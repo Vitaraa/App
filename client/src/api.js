@@ -32,5 +32,9 @@ export const api = {
     request("/auth/login", { method: "POST", body: { username, password } }),
   listTransactions: () => request("/transactions"),
   addTransaction: (tx) => request("/transactions", { method: "POST", body: tx }),
+  updateTransaction: (id, patch) =>
+    request(`/transactions/${id}`, { method: "PATCH", body: patch }),
+  importTransactions: (items) =>
+    request("/transactions/import", { method: "POST", body: { items } }),
   deleteTransaction: (id) => request(`/transactions/${id}`, { method: "DELETE" }),
 };

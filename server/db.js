@@ -28,6 +28,43 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id);
+
+  -- Learned categorization rules: when a user re-categorizes an imported
+  -- transaction, we remember the merchant token -> category mapping so future
+  -- imports of the same merchant are auto-labeled with confidence.
+  CREATE TABLE IF NOT EXISTS category_rules (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id   INTEGER NOT NULL,
+    pattern   TEXT NOT NULL,            -- normalized merchant token
+    category  TEXT NOT NULL,
+    hits      INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, pattern),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
+
+// ---- Lightweight migrations for existing databases --------------------------
+// Older budget.db files predate the import feature; add new columns if missing.
+const txCols = db.prepare("PRAGMA table_info(transactions)").all().map((c) => c.name);
+function addColumn(sql) {
+  try {
+    db.exec(sql);
+  } catch (e) {
+    if (!/duplicate column name/i.test(e.message)) throw e;
+  }
+}
+if (!txCols.includes("description")) {
+  // Raw merchant text from the statement (manual entries leave this empty).
+  addColumn("ALTER TABLE transactions ADD COLUMN description TEXT DEFAULT ''");
+}
+if (!txCols.includes("needs_review")) {
+  // 1 = auto-categorization was uncertain; show a warning flag in the UI.
+  addColumn("ALTER TABLE transactions ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0");
+}
+if (!txCols.includes("source")) {
+  // 'manual' or 'import'
+  addColumn("ALTER TABLE transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
+}
 
 export default db;

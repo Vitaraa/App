@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { useAuth } from "./AuthContext.jsx";
 import { api } from "./api.js";
+import Transactions from "./Transactions.jsx";
 
 const fmt = (n) =>
   n.toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -26,6 +27,7 @@ export default function Dashboard() {
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState("overview");
 
   // add-form state
   const [type, setType] = useState("expense");
@@ -101,8 +103,27 @@ export default function Dashboard() {
         </div>
       </header>
 
+      <nav className="tabs">
+        <button
+          className={`tab ${tab === "overview" ? "tab-on" : ""}`}
+          onClick={() => setTab("overview")}
+        >
+          Overview
+        </button>
+        <button
+          className={`tab ${tab === "transactions" ? "tab-on" : ""}`}
+          onClick={() => setTab("transactions")}
+        >
+          Transactions
+        </button>
+      </nav>
+
       {error && <div className="error">{error}</div>}
 
+      {tab === "transactions" ? (
+        <Transactions txns={txns} reload={load} />
+      ) : (
+      <>
       <section className="stats">
         <div className="card stat">
           <span className="muted">Income</span>
@@ -179,6 +200,8 @@ export default function Dashboard() {
             ))}
           </ul>
         </section>
+      )}
+      </>
       )}
     </div>
   );

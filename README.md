@@ -83,15 +83,36 @@ stored in the server's database.
 
 ## API reference
 
-| Method | Path                     | Auth | Body / notes                                   |
-| ------ | ------------------------ | ---- | ---------------------------------------------- |
-| POST   | `/api/auth/register`     | no   | `{ username, password }` → `{ token }`         |
-| POST   | `/api/auth/login`        | no   | `{ username, password }` → `{ token }`         |
-| GET    | `/api/transactions`      | yes  | list current user's transactions               |
-| POST   | `/api/transactions`      | yes  | `{ type, amount, category?, note?, date? }`    |
-| DELETE | `/api/transactions/:id`  | yes  | delete one of your transactions                |
+| Method | Path                        | Auth | Body / notes                                                    |
+| ------ | --------------------------- | ---- | -------------------------------------------------------------- |
+| POST   | `/api/auth/register`        | no   | `{ username, password }` → `{ token }`                         |
+| POST   | `/api/auth/login`           | no   | `{ username, password }` → `{ token }`                         |
+| GET    | `/api/transactions`         | yes  | list current user's transactions                               |
+| POST   | `/api/transactions`         | yes  | `{ type, amount, category?, note?, date? }`                    |
+| PATCH  | `/api/transactions/:id`     | yes  | edit `{ category?, note?, type?, amount?, date? }`; a category change clears the review flag and teaches a rule |
+| POST   | `/api/transactions/import`  | yes  | `{ items: [{ date, description, amount, type }] }` → `{ imported, flagged, skipped, rows }` |
+| DELETE | `/api/transactions/:id`     | yes  | delete one of your transactions                                |
 
 `type` is `"income"` or `"expense"`. Send the token as `Authorization: Bearer <token>`.
+
+## Transactions tab
+
+The dashboard has two tabs: **Overview** (totals + 6-month chart) and **Transactions**.
+
+- **Import statements.** Upload a bank **CSV** or **PDF** e-statement. The browser parses
+  it into candidate rows and the server records them. CSV is most reliable (single
+  signed-amount columns and separate debit/credit columns are both supported); PDF uses
+  best-effort line extraction, so layouts vary by bank.
+- **Auto-categorization.** Each imported transaction is labeled using a built-in merchant
+  keyword map plus rules the app **learns from your edits** — re-categorize a merchant once
+  and future imports of it are labeled automatically. Duplicate rows (same date, amount,
+  type, and description) are skipped on import.
+- **Review flags.** Anything the categorizer isn't confident about is imported as
+  `Uncategorized` with a ⚠ flag. Click a category pill to edit it inline, or use the
+  **Needs review** filter to see just the flagged rows.
+- **Insights box.** A summary panel surfaces abnormally large purchases (statistical
+  outliers vs. your typical spend), recurring/subscription charges with annualized cost,
+  month-over-month spending swings, and a count of items still needing review.
 
 ## Security notes
 
