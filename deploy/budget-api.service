@@ -1,0 +1,26 @@
+# systemd unit for the Budget API (Node/Express).
+# Install to: /etc/systemd/system/budget-api.service
+# Adjust WorkingDirectory / User / paths if you install somewhere other than /opt/budget.
+
+[Unit]
+Description=Budget API (Express + SQLite)
+After=network.target
+
+[Service]
+Type=simple
+# Run as a non-root user that owns /opt/budget (see DEPLOY.md to create it).
+User=budget
+Group=budget
+WorkingDirectory=/opt/budget/server
+# Loads PORT and JWT_SECRET from this file (same format as server/.env).
+EnvironmentFile=/opt/budget/server/.env
+ExecStart=/usr/bin/node index.js
+Restart=on-failure
+RestartSec=3
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
