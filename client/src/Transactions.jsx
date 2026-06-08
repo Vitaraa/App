@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { api } from "./api.js";
 import { parseStatementFile } from "./statementParser.js";
 import { computeInsights } from "./insights.js";
+import { shortenMerchant } from "./merchant.js";
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -19,6 +20,7 @@ export default function Transactions({ txns, reload }) {
   const [importMsg, setImportMsg] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editCat, setEditCat] = useState("");
+  const [expandedId, setExpandedId] = useState(null); // row showing full description
   const [filter, setFilter] = useState("all"); // all | review
 
   const insights = useMemo(() => computeInsights(txns), [txns]);
@@ -178,8 +180,22 @@ export default function Transactions({ txns, reload }) {
               {visible.map((t) => (
                 <tr key={t.id} className={t.needs_review ? "row-review" : ""}>
                   <td className="muted nowrap">{t.date}</td>
-                  <td className="desc" title={t.description || ""}>
-                    {t.description || <span className="muted">—</span>}
+                  <td className="desc">
+                    {t.description ? (
+                      <button
+                        className={`desc-btn ${expandedId === t.id ? "expanded" : ""}`}
+                        title="Click to show the full description"
+                        onClick={() =>
+                          setExpandedId(expandedId === t.id ? null : t.id)
+                        }
+                      >
+                        {expandedId === t.id
+                          ? t.description
+                          : shortenMerchant(t.description)}
+                      </button>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
                   </td>
                   <td>
                     {editingId === t.id ? (
@@ -198,7 +214,7 @@ export default function Transactions({ txns, reload }) {
                       </span>
                     ) : (
                       <button className="cat-pill" onClick={() => startEdit(t)} title="Click to edit category">
-                        {t.needs_review && <span className="warn-flag" title="Uncertain — please review">⚠</span>}
+                        {!!t.needs_review && <span className="warn-flag" title="Uncertain — please review">⚠</span>}
                         {t.category}
                       </button>
                     )}

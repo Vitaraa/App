@@ -60,6 +60,16 @@ function parseAmount(raw) {
   return negative ? -n : n;
 }
 
+// Statement *summary* fields (minimum payment, balances, credit limit, payment
+// due, etc.) carry dollar amounts but are NOT transactions — on a credit-card
+// statement the "Minimum Payment Due $10.00" line would otherwise be recorded
+// as a $10 charge. Skip any line that mentions one of these.
+const SUMMARY_RE =
+  /(minimum payment|minimum amount due|payment due|amount due|new balance|previous balance|statement balance|balance forward|credit limit|available credit|available balance|past due|total minimum|opening balance|closing balance|ending balance|beginning balance)/i;
+export function isStatementSummaryLine(text) {
+  return SUMMARY_RE.test(String(text || ""));
+}
+
 // ---- CSV --------------------------------------------------------------------
 // Minimal RFC-4180-ish parser that handles quoted fields and embedded commas.
 function parseCsvText(text) {
@@ -125,6 +135,7 @@ export function parseCsv(text) {
     if (!date) continue;
     const description = (descCol >= 0 ? r[descCol] : "").trim() ||
       r.filter((_, idx) => idx !== dateCol && idx !== amtCol).join(" ").trim();
+    if (isStatementSummaryLine(description)) continue;
 
     let amount = null;
     let type = null;
@@ -214,6 +225,7 @@ export async function parsePdf(arrayBuffer) {
 
   const out = [];
   for (const line of lines) {
+    if (isStatementSummaryLine(line)) continue; // skip min-payment/balance rows
     const dm = line.match(dateRe);
     if (!dm) continue;
     const date = normalizeDate(dm[1], fallbackYear);
