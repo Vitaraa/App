@@ -8,6 +8,9 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import db from "./db.js";
 import { categorize, merchantToken, normalizeDescription } from "./categorize.js";
+import { getQuotes } from "./quotes.js";
+
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 dotenv.config();
 
@@ -233,10 +236,151 @@ function kindForType(type, fallback) {
   return TYPE_KIND[type] || fallback || "asset";
 }
 
-app.get("/api/accounts", auth, (req, res) => {
+// Compute market value + cost basis for a set of holdings using live quotes.
+function valueHoldings(holdings, quotes) {
+  let value = 0;
+  let cost = 0;
+  for (const h of holdings) {
+    const price = quotes[String(h.ticker).toUpperCase()];
+    const unit = price != null ? price : h.purchase_price; // fall back to cost if no quote
+    value += unit * h.quantity;
+    cost += h.purchase_price * h.quantity;
+  }
+  return { value: round2(value), cost: round2(cost) };
+}
+
+// Each account gets a `value` (what net worth uses): the balance for normal
+// accounts, or live market value for investment accounts.
+app.get("/api/accounts", auth, async (req, res) => {
+  const accts = db
+    .prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY id")
+    .all(req.user.id);
+
+  const invIds = accts.filter((a) => a.type === "investment").map((a) => a.id);
+  const byAccount = {};
+  let quotes = {};
+  if (invIds.length) {
+    const holds = db
+      .prepare(
+        `SELECT * FROM holdings WHERE user_id = ? AND account_id IN (${invIds.map(() => "?").join(",")})`
+      )
+      .all(req.user.id, ...invIds);
+    for (const h of holds) (byAccount[h.account_id] ||= []).push(h);
+    try {
+      quotes = await getQuotes([...new Set(holds.map((h) => h.ticker))]);
+    } catch {
+      quotes = {};
+    }
+  }
+
+  const out = accts.map((a) => {
+    if (a.type === "investment") {
+      const { value, cost } = valueHoldings(byAccount[a.id] || [], quotes);
+      return { ...a, value, cost, growth: round2(value - cost), holdingsCount: (byAccount[a.id] || []).length };
+    }
+    return { ...a, value: a.balance };
+  });
+  res.json(out);
+});
+
+// ---- Holdings (stocks inside an investment account) ---------------------
+app.get("/api/accounts/:id/holdings", auth, async (req, res) => {
+  const acct = db
+    .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.user.id);
+  if (!acct) return res.status(404).json({ error: "Not found" });
+
+  const holds = db
+    .prepare("SELECT * FROM holdings WHERE account_id = ? AND user_id = ? ORDER BY id")
+    .all(req.params.id, req.user.id);
+  let quotes = {};
+  try {
+    quotes = await getQuotes(holds.map((h) => h.ticker));
+  } catch {
+    quotes = {};
+  }
   res.json(
-    db.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY id").all(req.user.id)
+    holds.map((h) => {
+      const price = quotes[String(h.ticker).toUpperCase()] ?? null;
+      const marketValue = round2((price ?? h.purchase_price) * h.quantity);
+      const costBasis = round2(h.purchase_price * h.quantity);
+      return {
+        ...h,
+        price,
+        marketValue,
+        costBasis,
+        gain: round2(marketValue - costBasis),
+        gainPct: costBasis > 0 ? round2(((marketValue - costBasis) / costBasis) * 100) : 0,
+      };
+    })
   );
+});
+
+app.post("/api/accounts/:id/holdings", auth, (req, res) => {
+  const acct = db
+    .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.user.id);
+  if (!acct) return res.status(404).json({ error: "Not found" });
+
+  const { ticker, quantity, purchase_price, purchase_date } = req.body || {};
+  if (!ticker || !String(ticker).trim())
+    return res.status(400).json({ error: "ticker is required" });
+  const info = db
+    .prepare(
+      `INSERT INTO holdings (user_id, account_id, ticker, quantity, purchase_price, purchase_date)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      req.user.id,
+      acct.id,
+      String(ticker).trim().toUpperCase(),
+      Number(quantity) || 0,
+      Number(purchase_price) || 0,
+      purchase_date || null
+    );
+  res.status(201).json(db.prepare("SELECT * FROM holdings WHERE id = ?").get(info.lastInsertRowid));
+});
+
+app.patch("/api/holdings/:id", auth, (req, res) => {
+  const row = db
+    .prepare("SELECT * FROM holdings WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const { ticker, quantity, purchase_price, purchase_date } = req.body || {};
+  db.prepare(
+    `UPDATE holdings SET ticker = ?, quantity = ?, purchase_price = ?, purchase_date = ?
+     WHERE id = ? AND user_id = ?`
+  ).run(
+    ticker != null ? String(ticker).trim().toUpperCase() : row.ticker,
+    quantity != null ? Number(quantity) || 0 : row.quantity,
+    purchase_price != null ? Number(purchase_price) || 0 : row.purchase_price,
+    purchase_date != null ? purchase_date : row.purchase_date,
+    row.id,
+    req.user.id
+  );
+  res.json(db.prepare("SELECT * FROM holdings WHERE id = ?").get(row.id));
+});
+
+app.delete("/api/holdings/:id", auth, (req, res) => {
+  const info = db
+    .prepare("DELETE FROM holdings WHERE id = ? AND user_id = ?")
+    .run(req.params.id, req.user.id);
+  if (info.changes === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
+// Raw quotes for a comma-separated symbol list (cached server-side).
+app.get("/api/quotes", auth, async (req, res) => {
+  const symbols = String(req.query.symbols || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!symbols.length) return res.json({});
+  try {
+    res.json(await getQuotes(symbols));
+  } catch {
+    res.json({});
+  }
 });
 
 app.post("/api/accounts", auth, (req, res) => {

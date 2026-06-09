@@ -60,13 +60,15 @@ export function netWorthSeries(txns, granularity, anchorTotal = null) {
   return series;
 }
 
-// Current net worth from accounts: assets minus liabilities.
+// Current net worth from accounts: assets minus liabilities. Uses the
+// server-computed `value` when present (investment accounts price their
+// holdings live); otherwise the stored balance.
 export function accountsNetWorth(accounts) {
   return round2(
-    (accounts || []).reduce(
-      (sum, a) => sum + (a.kind === "liability" ? -Number(a.balance || 0) : Number(a.balance || 0)),
-      0
-    )
+    (accounts || []).reduce((sum, a) => {
+      const v = a.value != null ? Number(a.value) : Number(a.balance || 0);
+      return sum + (a.kind === "liability" ? -v : v);
+    }, 0)
   );
 }
 

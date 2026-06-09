@@ -86,6 +86,23 @@ db.exec(`
     UNIQUE(user_id, name),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  -- Stock holdings (lots) inside an investment-type account. Market value and
+  -- growth are computed from live quotes at request time, not stored.
+  CREATE TABLE IF NOT EXISTS holdings (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL,
+    account_id     INTEGER NOT NULL,
+    ticker         TEXT NOT NULL,
+    quantity       REAL NOT NULL DEFAULT 0,
+    purchase_price REAL NOT NULL DEFAULT 0,
+    purchase_date  TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_holdings_acct ON holdings(account_id);
 `);
 
 // ---- Lightweight migrations for existing databases --------------------------
