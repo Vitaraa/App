@@ -45,6 +45,7 @@ export const api = {
   deleteAccount: (id) => request(`/accounts/${id}`, { method: "DELETE" }),
 
   // Investment holdings (inside an investment account)
+  searchSymbols: (q) => request(`/symbol-search?q=${encodeURIComponent(q)}`),
   listHoldings: (accountId) => request(`/accounts/${accountId}/holdings`),
   addHolding: (accountId, h) =>
     request(`/accounts/${accountId}/holdings`, { method: "POST", body: h }),

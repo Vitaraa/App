@@ -8,7 +8,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import db from "./db.js";
 import { categorize, merchantToken, normalizeDescription } from "./categorize.js";
-import { getQuotes } from "./quotes.js";
+import { getQuotes, searchSymbols } from "./quotes.js";
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
@@ -367,6 +367,15 @@ app.delete("/api/holdings/:id", auth, (req, res) => {
     .run(req.params.id, req.user.id);
   if (info.changes === 0) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true });
+});
+
+// Ticker autocomplete search.
+app.get("/api/symbol-search", auth, async (req, res) => {
+  try {
+    res.json(await searchSymbols(req.query.q));
+  } catch {
+    res.json([]);
+  }
 });
 
 // Raw quotes for a comma-separated symbol list (cached server-side).

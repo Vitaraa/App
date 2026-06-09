@@ -1,18 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
 const pctText = (n) => `${n >= 0 ? "+" : ""}${Number(n).toFixed(2)}%`;
 
+const emptyForm = { ticker: "", quantity: "", price: "", date: "" };
+
 export default function InvestmentHoldings({ accountId, onChange }) {
   const [holdings, setHoldings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
-  const [ticker, setTicker] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [price, setPrice] = useState("");
-  const [date, setDate] = useState("");
+  const [modal, setModal] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggest, setShowSuggest] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const searchSeq = useRef(0);
 
   async function load() {
     setLoading(true);
@@ -28,22 +31,74 @@ export default function InvestmentHoldings({ accountId, onChange }) {
     load();
   }, [accountId]);
 
-  async function add(e) {
+  // Debounced ticker search.
+  useEffect(() => {
+    if (!modal) return;
+    const q = form.ticker.trim();
+    if (q.length < 1) {
+      setSuggestions([]);
+      return;
+    }
+    const seq = ++searchSeq.current;
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.searchSymbols(q);
+        if (seq === searchSeq.current) setSuggestions(res);
+      } catch {
+        if (seq === searchSeq.current) setSuggestions([]);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [form.ticker, modal]);
+
+  // Close modal on Escape.
+  useEffect(() => {
+    if (!modal) return;
+    const onKey = (e) => e.key === "Escape" && closeModal();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modal]);
+
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  function openModal() {
+    setForm(emptyForm);
+    setSuggestions([]);
+    setShowSuggest(false);
+    setModal(true);
+  }
+  function closeModal() {
+    setModal(false);
+    setShowSuggest(false);
+  }
+  function pickSuggestion(s) {
+    setForm((f) => ({ ...f, ticker: s.symbol }));
+    setShowSuggest(false);
+  }
+
+  // All fields are required — no submitting a half-filled holding.
+  const valid =
+    form.ticker.trim() &&
+    Number(form.quantity) > 0 &&
+    Number(form.price) > 0 &&
+    form.date;
+
+  async function submit(e) {
     e.preventDefault();
-    if (!ticker.trim()) return;
-    await api.addHolding(accountId, {
-      ticker: ticker.trim(),
-      quantity: Number(quantity) || 0,
-      purchase_price: Number(price) || 0,
-      purchase_date: date || null,
-    });
-    setTicker("");
-    setQuantity("");
-    setPrice("");
-    setDate("");
-    setAdding(false);
-    await load();
-    onChange && onChange();
+    if (!valid || saving) return;
+    setSaving(true);
+    try {
+      await api.addHolding(accountId, {
+        ticker: form.ticker.trim(),
+        quantity: Number(form.quantity),
+        purchase_price: Number(form.price),
+        purchase_date: form.date,
+      });
+      closeModal();
+      await load();
+      onChange && onChange();
+    } finally {
+      setSaving(false);
+    }
   }
   async function remove(id) {
     await api.deleteHolding(id);
@@ -55,25 +110,13 @@ export default function InvestmentHoldings({ accountId, onChange }) {
     <div className="holdings">
       <div className="holdings-head">
         <span className="muted">Holdings</span>
-        <button className="link sm" onClick={() => setAdding((v) => !v)}>
-          {adding ? "Cancel" : "+ Add stock"}
-        </button>
+        <button className="link sm" onClick={openModal}>+ Add stock</button>
       </div>
-
-      {adding && (
-        <form className="holding-add" onSubmit={add}>
-          <input placeholder="Ticker (e.g. AAPL)" value={ticker} onChange={(e) => setTicker(e.target.value)} />
-          <input type="number" step="any" placeholder="Qty" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-          <input type="number" step="0.01" placeholder="Buy price" value={price} onChange={(e) => setPrice(e.target.value)} />
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <button className="btn primary sm" type="submit">Add</button>
-        </form>
-      )}
 
       {loading ? (
         <p className="muted sm">Loading live prices…</p>
       ) : holdings.length === 0 ? (
-        <p className="muted sm">No stocks yet. Add one above to start tracking growth.</p>
+        <p className="muted sm">No stocks yet. Add one to start tracking growth.</p>
       ) : (
         <table className="holdings-table">
           <thead>
@@ -112,6 +155,73 @@ export default function InvestmentHoldings({ accountId, onChange }) {
       )}
       {!loading && holdings.some((h) => h.price == null) && (
         <p className="muted sm">Some prices couldn't be fetched — showing cost basis for those.</p>
+      )}
+
+      {modal && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="modal-head">
+              <span className="modal-title">Add stock</span>
+              <button className="modal-close" onClick={closeModal} aria-label="Close">×</button>
+            </div>
+            <form className="modal-form" onSubmit={submit}>
+              <div className="field">
+                <label>Ticker</label>
+                <div className="ticker-wrap">
+                  <input
+                    placeholder="Search e.g. NVDA, Apple…"
+                    value={form.ticker}
+                    onChange={(e) => {
+                      set("ticker")(e);
+                      setShowSuggest(true);
+                    }}
+                    onFocus={() => setShowSuggest(true)}
+                    onBlur={() => setTimeout(() => setShowSuggest(false), 120)}
+                    autoFocus
+                    autoComplete="off"
+                  />
+                  {showSuggest && suggestions.length > 0 && (
+                    <div className="ticker-suggest">
+                      {suggestions.map((s) => (
+                        <div
+                          key={`${s.symbol}-${s.exchange}`}
+                          className="suggest-item"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => pickSuggestion(s)}
+                        >
+                          <span className="suggest-sym">{s.symbol}</span>
+                          <span className="suggest-desc">{s.description}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label>Quantity</label>
+                  <input type="number" step="any" min="0" placeholder="0" value={form.quantity} onChange={set("quantity")} />
+                </div>
+                <div className="field">
+                  <label>Purchase price</label>
+                  <input type="number" step="0.01" min="0" placeholder="0.00" value={form.price} onChange={set("price")} />
+                </div>
+                <div className="field">
+                  <label>Purchase date</label>
+                  <input type="date" value={form.date} onChange={set("date")} />
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button className="btn ghost" type="button" onClick={closeModal}>Cancel</button>
+                <button className="btn primary" type="submit" disabled={!valid || saving}>
+                  {saving ? "Adding…" : "Add stock"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

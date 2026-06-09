@@ -87,3 +87,57 @@ export async function getQuotes(symbols) {
 }
 
 export const quoteProvider = FINNHUB_KEY ? "finnhub" : "yahoo";
+
+// Symbol search for the ticker autocomplete. Returns
+// [{ symbol, description, exchange }]. Uses Finnhub when keyed, else Yahoo.
+const searchCache = new Map(); // q -> { results, ts }
+const SEARCH_TTL = 60 * 60 * 1000; // 1 hour
+
+export async function searchSymbols(query) {
+  const q = String(query || "").trim();
+  if (q.length < 1) return [];
+  const key = q.toUpperCase();
+  const cached = searchCache.get(key);
+  if (cached && Date.now() - cached.ts < SEARCH_TTL) return cached.results;
+
+  let results = [];
+  try {
+    if (FINNHUB_KEY) {
+      const r = await fetchWithTimeout(
+        `https://finnhub.io/api/v1/search?q=${encodeURIComponent(q)}&token=${FINNHUB_KEY}`
+      );
+      if (r.ok) {
+        const j = await r.json();
+        results = (j.result || []).map((x) => ({
+          symbol: x.symbol,
+          description: x.description || "",
+          exchange: x.type || "",
+        }));
+      }
+    }
+    if (!results.length) {
+      const r = await fetchWithTimeout(
+        `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(
+          q
+        )}&quotesCount=12&newsCount=0`,
+        { headers: { "User-Agent": "Mozilla/5.0" } }
+      );
+      if (r.ok) {
+        const j = await r.json();
+        results = (j.quotes || [])
+          .filter((x) => x.symbol)
+          .map((x) => ({
+            symbol: x.symbol,
+            description: x.shortname || x.longname || "",
+            exchange: x.exchDisp || x.exchange || "",
+          }));
+      }
+    }
+  } catch {
+    /* network/parse error -> empty */
+  }
+
+  results = results.filter((x) => x.symbol).slice(0, 12);
+  if (results.length) searchCache.set(key, { results, ts: Date.now() });
+  return results;
+}
