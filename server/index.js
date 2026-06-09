@@ -221,6 +221,136 @@ app.delete("/api/transactions/:id", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Accounts (for net worth) -------------------------------------------
+app.get("/api/accounts", auth, (req, res) => {
+  res.json(
+    db.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY id").all(req.user.id)
+  );
+});
+
+app.post("/api/accounts", auth, (req, res) => {
+  const { name, kind, balance } = req.body || {};
+  if (!name || !String(name).trim())
+    return res.status(400).json({ error: "name is required" });
+  const k = kind === "liability" ? "liability" : "asset";
+  const bal = Number(balance) || 0;
+  const info = db
+    .prepare("INSERT INTO accounts (user_id, name, kind, balance) VALUES (?, ?, ?, ?)")
+    .run(req.user.id, String(name).trim(), k, bal);
+  res.status(201).json(db.prepare("SELECT * FROM accounts WHERE id = ?").get(info.lastInsertRowid));
+});
+
+app.patch("/api/accounts/:id", auth, (req, res) => {
+  const row = db
+    .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const { name, kind, balance } = req.body || {};
+  db.prepare(
+    "UPDATE accounts SET name = ?, kind = ?, balance = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
+  ).run(
+    name != null ? String(name).trim() : row.name,
+    kind === "asset" || kind === "liability" ? kind : row.kind,
+    balance != null ? Number(balance) || 0 : row.balance,
+    row.id,
+    req.user.id
+  );
+  res.json(db.prepare("SELECT * FROM accounts WHERE id = ?").get(row.id));
+});
+
+app.delete("/api/accounts/:id", auth, (req, res) => {
+  const info = db
+    .prepare("DELETE FROM accounts WHERE id = ? AND user_id = ?")
+    .run(req.params.id, req.user.id);
+  if (info.changes === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
+// ---- Savings goals ------------------------------------------------------
+app.get("/api/goals", auth, (req, res) => {
+  res.json(
+    db.prepare("SELECT * FROM goals WHERE user_id = ? ORDER BY id").all(req.user.id)
+  );
+});
+
+app.post("/api/goals", auth, (req, res) => {
+  const { name, target, saved } = req.body || {};
+  if (!name || !String(name).trim())
+    return res.status(400).json({ error: "name is required" });
+  const info = db
+    .prepare("INSERT INTO goals (user_id, name, target, saved) VALUES (?, ?, ?, ?)")
+    .run(req.user.id, String(name).trim(), Number(target) || 0, Number(saved) || 0);
+  res.status(201).json(db.prepare("SELECT * FROM goals WHERE id = ?").get(info.lastInsertRowid));
+});
+
+app.patch("/api/goals/:id", auth, (req, res) => {
+  const row = db
+    .prepare("SELECT * FROM goals WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const { name, target, saved } = req.body || {};
+  db.prepare("UPDATE goals SET name = ?, target = ?, saved = ? WHERE id = ? AND user_id = ?").run(
+    name != null ? String(name).trim() : row.name,
+    target != null ? Number(target) || 0 : row.target,
+    saved != null ? Number(saved) || 0 : row.saved,
+    row.id,
+    req.user.id
+  );
+  res.json(db.prepare("SELECT * FROM goals WHERE id = ?").get(row.id));
+});
+
+app.delete("/api/goals/:id", auth, (req, res) => {
+  const info = db
+    .prepare("DELETE FROM goals WHERE id = ? AND user_id = ?")
+    .run(req.params.id, req.user.id);
+  if (info.changes === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
+// ---- Subscriptions (manual) ---------------------------------------------
+app.get("/api/subscriptions", auth, (req, res) => {
+  res.json(
+    db.prepare("SELECT * FROM subscriptions WHERE user_id = ? ORDER BY id").all(req.user.id)
+  );
+});
+
+app.post("/api/subscriptions", auth, (req, res) => {
+  const { name, amount, cadence } = req.body || {};
+  if (!name || !String(name).trim())
+    return res.status(400).json({ error: "name is required" });
+  const cad = cadence === "annual" ? "annual" : "monthly";
+  const info = db
+    .prepare("INSERT INTO subscriptions (user_id, name, amount, cadence) VALUES (?, ?, ?, ?)")
+    .run(req.user.id, String(name).trim(), Number(amount) || 0, cad);
+  res.status(201).json(db.prepare("SELECT * FROM subscriptions WHERE id = ?").get(info.lastInsertRowid));
+});
+
+app.patch("/api/subscriptions/:id", auth, (req, res) => {
+  const row = db
+    .prepare("SELECT * FROM subscriptions WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const { name, amount, cadence } = req.body || {};
+  db.prepare(
+    "UPDATE subscriptions SET name = ?, amount = ?, cadence = ? WHERE id = ? AND user_id = ?"
+  ).run(
+    name != null ? String(name).trim() : row.name,
+    amount != null ? Number(amount) || 0 : row.amount,
+    cadence === "monthly" || cadence === "annual" ? cadence : row.cadence,
+    row.id,
+    req.user.id
+  );
+  res.json(db.prepare("SELECT * FROM subscriptions WHERE id = ?").get(row.id));
+});
+
+app.delete("/api/subscriptions/:id", auth, (req, res) => {
+  const info = db
+    .prepare("DELETE FROM subscriptions WHERE id = ? AND user_id = ?")
+    .run(req.params.id, req.user.id);
+  if (info.changes === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
 // ---- Serve built frontend (production single-server mode) ---------------
 const clientDist = path.join(__dirname, "..", "client", "dist");
 if (fs.existsSync(clientDist)) {

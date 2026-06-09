@@ -37,4 +37,23 @@ export const api = {
   importTransactions: (items) =>
     request("/transactions/import", { method: "POST", body: { items } }),
   deleteTransaction: (id) => request(`/transactions/${id}`, { method: "DELETE" }),
+
+  // Accounts (net worth)
+  listAccounts: () => request("/accounts"),
+  addAccount: (a) => request("/accounts", { method: "POST", body: a }),
+  updateAccount: (id, patch) => request(`/accounts/${id}`, { method: "PATCH", body: patch }),
+  deleteAccount: (id) => request(`/accounts/${id}`, { method: "DELETE" }),
+
+  // Savings goals
+  listGoals: () => request("/goals"),
+  addGoal: (g) => request("/goals", { method: "POST", body: g }),
+  updateGoal: (id, patch) => request(`/goals/${id}`, { method: "PATCH", body: patch }),
+  deleteGoal: (id) => request(`/goals/${id}`, { method: "DELETE" }),
+
+  // Subscriptions (manual)
+  listSubscriptions: () => request("/subscriptions"),
+  addSubscription: (s) => request("/subscriptions", { method: "POST", body: s }),
+  updateSubscription: (id, patch) =>
+    request(`/subscriptions/${id}`, { method: "PATCH", body: patch }),
+  deleteSubscription: (id) => request(`/subscriptions/${id}`, { method: "DELETE" }),
 };

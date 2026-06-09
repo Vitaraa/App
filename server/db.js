@@ -42,6 +42,39 @@ db.exec(`
     UNIQUE(user_id, pattern),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  -- Accounts power the "true net worth" view: assets minus liabilities.
+  CREATE TABLE IF NOT EXISTS accounts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'asset' CHECK (kind IN ('asset','liability')),
+    balance    REAL NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  -- Manual savings goals.
+  CREATE TABLE IF NOT EXISTS goals (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    target     REAL NOT NULL DEFAULT 0,
+    saved      REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  -- Manually-tracked subscriptions (auto-detected ones come from transactions).
+  CREATE TABLE IF NOT EXISTS subscriptions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    amount     REAL NOT NULL DEFAULT 0,
+    cadence    TEXT NOT NULL DEFAULT 'monthly' CHECK (cadence IN ('monthly','annual')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 // ---- Lightweight migrations for existing databases --------------------------
