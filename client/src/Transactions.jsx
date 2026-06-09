@@ -20,28 +20,40 @@ export default function Transactions({ txns, reload }) {
   const [importMsg, setImportMsg] = useState("");
   const [expandedId, setExpandedId] = useState(null); // row showing full description
   const [filter, setFilter] = useState("all"); // all | review
-  const [sort, setSort] = useState("date-desc"); // date-desc | date-asc | amount-desc | amount-asc
+  // Sort by a column key with a direction. Click a header to sort / toggle.
+  const [sort, setSort] = useState({ key: "date", dir: "desc" });
 
   const insights = useMemo(() => computeInsights(txns), [txns]);
 
+  // Click a column header: toggle direction if it's already active, otherwise
+  // switch to it with a sensible default (newest/highest first for date/amount,
+  // A→Z for text columns).
+  function toggleSort(key) {
+    setSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "date" || key === "amount" ? "desc" : "asc" }
+    );
+  }
+
   const visible = useMemo(() => {
     const base = filter === "review" ? txns.filter((t) => t.needs_review) : txns;
-    const arr = [...base];
-    switch (sort) {
-      case "date-asc":
-        arr.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
-        break;
-      case "amount-desc":
-        arr.sort((a, b) => b.amount - a.amount);
-        break;
-      case "amount-asc":
-        arr.sort((a, b) => a.amount - b.amount);
-        break;
-      case "date-desc":
-      default:
-        arr.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-    }
-    return arr;
+    const text = (v) => String(v || "");
+    const comparators = {
+      date: (a, b) => a.date.localeCompare(b.date),
+      amount: (a, b) => a.amount - b.amount,
+      category: (a, b) =>
+        text(a.category).localeCompare(text(b.category), undefined, { sensitivity: "base" }),
+      description: (a, b) =>
+        shortenMerchant(text(a.description)).localeCompare(
+          shortenMerchant(text(b.description)),
+          undefined,
+          { sensitivity: "base" }
+        ),
+    };
+    const cmp = comparators[sort.key] || comparators.date;
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...base].sort((a, b) => mul * (cmp(a, b) || a.id - b.id));
   }, [txns, filter, sort]);
   const reviewCount = useMemo(
     () => txns.filter((t) => t.needs_review).length,
@@ -154,32 +166,19 @@ export default function Transactions({ txns, reload }) {
           <span className="muted">
             {visible.length} transaction{visible.length === 1 ? "" : "s"}
           </span>
-          <div className="tx-controls">
-            <div className="tx-filters">
-              <button
-                className={`chip ${filter === "all" ? "chip-on" : ""}`}
-                onClick={() => setFilter("all")}
-              >
-                All
-              </button>
-              <button
-                className={`chip ${filter === "review" ? "chip-on" : ""}`}
-                onClick={() => setFilter("review")}
-              >
-                Needs review{reviewCount ? ` (${reviewCount})` : ""}
-              </button>
-            </div>
-            <select
-              className="sort-select"
-              value={sort}
-              onChange={(e) => setSort(e.target.value)}
-              title="Sort transactions"
+          <div className="tx-filters">
+            <button
+              className={`chip ${filter === "all" ? "chip-on" : ""}`}
+              onClick={() => setFilter("all")}
             >
-              <option value="date-desc">Date: newest first</option>
-              <option value="date-asc">Date: oldest first</option>
-              <option value="amount-desc">Amount: high to low</option>
-              <option value="amount-asc">Amount: low to high</option>
-            </select>
+              All
+            </button>
+            <button
+              className={`chip ${filter === "review" ? "chip-on" : ""}`}
+              onClick={() => setFilter("review")}
+            >
+              Needs review{reviewCount ? ` (${reviewCount})` : ""}
+            </button>
           </div>
         </div>
 
@@ -193,10 +192,25 @@ export default function Transactions({ txns, reload }) {
           <table className="tx-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Category</th>
-                <th className="right">Amount</th>
+                {[
+                  ["date", "Date", ""],
+                  ["description", "Description", ""],
+                  ["category", "Category", ""],
+                  ["amount", "Amount", "right"],
+                ].map(([key, label, align]) => (
+                  <th key={key} className={align}>
+                    <button
+                      className={`th-sort ${align} ${sort.key === key ? "th-active" : ""}`}
+                      onClick={() => toggleSort(key)}
+                      title={`Sort by ${label.toLowerCase()}`}
+                    >
+                      {label}
+                      <span className="th-arrow">
+                        {sort.key === key ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+                      </span>
+                    </button>
+                  </th>
+                ))}
                 <th></th>
               </tr>
             </thead>
