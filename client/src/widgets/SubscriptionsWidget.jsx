@@ -61,7 +61,7 @@ export default function SubscriptionsWidget({ txns }) {
     <section className="card widget widget-md">
       <div className="widget-head">
         <div>
-          <span className="muted">Subscriptions</span>
+          <span className="muted">Recurring</span>
           <div className="widget-value neg">
             {fmt(merged.totalMonthly)}<span className="muted unit"> / mo</span>
           </div>
@@ -96,7 +96,7 @@ export default function SubscriptionsWidget({ txns }) {
       )}
 
       {merged.all.length === 0 ? (
-        <p className="muted empty sm">No subscriptions detected yet. Add one or import statements.</p>
+        <p className="muted empty sm">No recurring charges detected yet. Add one or import statements.</p>
       ) : (
         <ul className="sub-list">
           {merged.all.map((s, i) => (
@@ -112,7 +112,7 @@ export default function SubscriptionsWidget({ txns }) {
               ) : (
                 <button
                   className="x"
-                  title="Not a subscription — dismiss"
+                  title="Not recurring — dismiss"
                   onClick={() => dismissAuto(s.name)}
                 >
                   ×
