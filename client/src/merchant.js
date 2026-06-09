@@ -45,10 +45,15 @@ const REGIONS = new Set([
 export function shortenMerchant(raw, maxWords = 5) {
   if (!raw) return "";
   let s = String(raw).replace(/\s+/g, " ").trim();
+  // Some statements glue the store number (and city) onto the name with no
+  // space, e.g. "SUPERCENTER#3652RICHMOND". Split a "#" off the preceding
+  // letter so the number/city can be stripped below.
+  s = s.replace(/([A-Za-z])#/g, "$1 #");
 
-  // Strip a leading processor prefix and any trailing "*token" cruft.
+  // Strip a leading processor prefix and any "*token" order/auth cruft
+  // (e.g. "AMZN Mktp CA*BJ9PL8JX1" -> "AMZN Mktp CA").
   s = s.replace(PROCESSOR_PREFIX, "").trim();
-  s = s.replace(/\*\S*$/, "").trim();
+  s = s.replace(/\*\S*/g, " ").replace(/\s+/g, " ").trim();
   // Drop everything from the first long digit run (store/ref #) onward.
   const numCut = s.replace(/\s+#?\d{3,}.*$/, "").trim();
   if (numCut) s = numCut;

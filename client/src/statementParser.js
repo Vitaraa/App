@@ -239,15 +239,21 @@ export async function parsePdf(arrayBuffer) {
       .slice(dm[0].length, line.length - am[0].length)
       .replace(/\s+/g, " ")
       .trim();
-    // Strip a leading second date (posted vs transaction date columns).
+    // Strip a leading second date — transaction rows often show both a
+    // transaction date and a posting date, e.g. "Apr 16  Apr 20  MERCHANT".
     description = description.replace(dateRe, "").trim();
-    if (!description) description = "(statement line)";
 
-    // Heuristic: explicit negatives / parentheses => expense; otherwise the
-    // sign is ambiguous in many PDFs, so default to expense and let income
-    // keywords (PAYROLL/DEPOSIT) reclassify server-side via review.
-    const looksCredit = /\b(deposit|payroll|credit|refund|interest)\b/i.test(description);
-    const type = amount < 0 ? "expense" : looksCredit ? "income" : "expense";
+    // A real transaction always has a merchant name. If the line reduces to no
+    // letters it's statement scaffolding — most importantly the payment slip's
+    // "Jun 04, 2026   $10.00" (minimum-payment-due) line, whose "Minimum
+    // Payment" label sits on a separate line so the keyword filter can't see
+    // it. Skip anything without an actual description.
+    if (!/[a-z]/i.test(description)) continue;
+
+    // On a credit-card statement a negative amount is a credit/refund (money
+    // back), not a charge — treat it as income.
+    const looksCredit = /\b(deposit|payroll|credit|refund|cash ?back|remise)\b/i.test(description);
+    const type = amount < 0 ? "income" : looksCredit ? "income" : "expense";
 
     out.push({ date, description: description.slice(0, 300), amount: Math.abs(amount), type });
   }

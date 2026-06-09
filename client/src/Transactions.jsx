@@ -18,17 +18,31 @@ export default function Transactions({ txns, reload }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [importMsg, setImportMsg] = useState("");
-  const [editingId, setEditingId] = useState(null);
-  const [editCat, setEditCat] = useState("");
   const [expandedId, setExpandedId] = useState(null); // row showing full description
   const [filter, setFilter] = useState("all"); // all | review
+  const [sort, setSort] = useState("date-desc"); // date-desc | date-asc | amount-desc | amount-asc
 
   const insights = useMemo(() => computeInsights(txns), [txns]);
 
-  const visible = useMemo(
-    () => (filter === "review" ? txns.filter((t) => t.needs_review) : txns),
-    [txns, filter]
-  );
+  const visible = useMemo(() => {
+    const base = filter === "review" ? txns.filter((t) => t.needs_review) : txns;
+    const arr = [...base];
+    switch (sort) {
+      case "date-asc":
+        arr.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+        break;
+      case "amount-desc":
+        arr.sort((a, b) => b.amount - a.amount);
+        break;
+      case "amount-asc":
+        arr.sort((a, b) => a.amount - b.amount);
+        break;
+      case "date-desc":
+      default:
+        arr.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
+    }
+    return arr;
+  }, [txns, filter, sort]);
   const reviewCount = useMemo(
     () => txns.filter((t) => t.needs_review).length,
     [txns]
@@ -63,14 +77,11 @@ export default function Transactions({ txns, reload }) {
     }
   }
 
-  function startEdit(t) {
-    setEditingId(t.id);
-    setEditCat(t.category);
-  }
-  async function saveEdit(t) {
+  // Changing the dropdown saves immediately — no separate Save click.
+  async function changeCategory(t, category) {
+    if (category === t.category) return;
     try {
-      await api.updateTransaction(t.id, { category: editCat, type: t.type });
-      setEditingId(null);
+      await api.updateTransaction(t.id, { category, type: t.type });
       reload();
     } catch (err) {
       setError(err.message);
@@ -143,19 +154,32 @@ export default function Transactions({ txns, reload }) {
           <span className="muted">
             {visible.length} transaction{visible.length === 1 ? "" : "s"}
           </span>
-          <div className="tx-filters">
-            <button
-              className={`chip ${filter === "all" ? "chip-on" : ""}`}
-              onClick={() => setFilter("all")}
+          <div className="tx-controls">
+            <div className="tx-filters">
+              <button
+                className={`chip ${filter === "all" ? "chip-on" : ""}`}
+                onClick={() => setFilter("all")}
+              >
+                All
+              </button>
+              <button
+                className={`chip ${filter === "review" ? "chip-on" : ""}`}
+                onClick={() => setFilter("review")}
+              >
+                Needs review{reviewCount ? ` (${reviewCount})` : ""}
+              </button>
+            </div>
+            <select
+              className="sort-select"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              title="Sort transactions"
             >
-              All
-            </button>
-            <button
-              className={`chip ${filter === "review" ? "chip-on" : ""}`}
-              onClick={() => setFilter("review")}
-            >
-              Needs review{reviewCount ? ` (${reviewCount})` : ""}
-            </button>
+              <option value="date-desc">Date: newest first</option>
+              <option value="date-asc">Date: oldest first</option>
+              <option value="amount-desc">Amount: high to low</option>
+              <option value="amount-asc">Amount: low to high</option>
+            </select>
           </div>
         </div>
 
@@ -198,26 +222,21 @@ export default function Transactions({ txns, reload }) {
                     )}
                   </td>
                   <td>
-                    {editingId === t.id ? (
-                      <span className="edit-cat">
-                        <select
-                          value={editCat}
-                          onChange={(e) => setEditCat(e.target.value)}
-                          autoFocus
-                        >
-                          {CATEGORIES.map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                        <button className="link" onClick={() => saveEdit(t)}>Save</button>
-                        <button className="link muted" onClick={() => setEditingId(null)}>Cancel</button>
-                      </span>
-                    ) : (
-                      <button className="cat-pill" onClick={() => startEdit(t)} title="Click to edit category">
-                        {!!t.needs_review && <span className="warn-flag" title="Uncertain — please review">⚠</span>}
-                        {t.category}
-                      </button>
-                    )}
+                    <div className="cat-cell">
+                      {!!t.needs_review && (
+                        <span className="warn-flag" title="Uncertain — please review">⚠</span>
+                      )}
+                      <select
+                        className={`cat-select ${t.needs_review ? "cat-review" : ""}`}
+                        value={t.category}
+                        onChange={(e) => changeCategory(t, e.target.value)}
+                        title="Change category"
+                      >
+                        {CATEGORIES.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
                   </td>
                   <td className={`right nowrap ${t.type === "income" ? "pos" : "neg"}`}>
                     {t.type === "income" ? "+" : "-"}{fmt(t.amount)}

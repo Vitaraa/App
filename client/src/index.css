@@ -392,37 +392,46 @@ select:focus {
 .row-review {
   background: rgba(251, 191, 36, 0.06);
 }
-.cat-pill {
-  background: #0f1218;
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 0.82rem;
-  cursor: pointer;
-  width: auto;
-  margin-top: 0;
+.warn-flag {
+  color: #fbbf24;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.cat-cell {
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
-.cat-pill:hover {
+.cat-select {
+  width: auto;
+  margin-top: 0;
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.cat-select:hover {
   border-color: var(--accent);
 }
-.warn-flag {
-  color: #fbbf24;
-  font-size: 0.85rem;
+.cat-select.cat-review {
+  border-color: rgba(251, 191, 36, 0.6);
 }
-.edit-cat {
-  display: inline-flex;
+
+/* Sort control */
+.tx-controls {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
-.edit-cat select {
+.sort-select {
   width: auto;
   margin-top: 0;
   padding: 5px 8px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+  border-radius: 9px;
+  cursor: pointer;
 }
 
 @media (max-width: 560px) {
