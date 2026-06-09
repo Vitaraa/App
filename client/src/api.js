@@ -56,4 +56,9 @@ export const api = {
   updateSubscription: (id, patch) =>
     request(`/subscriptions/${id}`, { method: "PATCH", body: patch }),
   deleteSubscription: (id) => request(`/subscriptions/${id}`, { method: "DELETE" }),
+
+  // Dismissed auto-detected subscriptions
+  listSubIgnores: () => request("/sub-ignores"),
+  ignoreSubscription: (name) => request("/sub-ignores", { method: "POST", body: { name } }),
+  unignoreSubscription: (id) => request(`/sub-ignores/${id}`, { method: "DELETE" }),
 };

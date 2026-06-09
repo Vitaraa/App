@@ -351,6 +351,33 @@ app.delete("/api/subscriptions/:id", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// Dismissed auto-detected subscriptions (false positives).
+app.get("/api/sub-ignores", auth, (req, res) => {
+  res.json(
+    db.prepare("SELECT * FROM sub_ignores WHERE user_id = ? ORDER BY id").all(req.user.id)
+  );
+});
+
+app.post("/api/sub-ignores", auth, (req, res) => {
+  const name = (req.body && req.body.name ? String(req.body.name) : "").trim();
+  if (!name) return res.status(400).json({ error: "name is required" });
+  db.prepare(
+    "INSERT INTO sub_ignores (user_id, name) VALUES (?, ?) ON CONFLICT(user_id, name) DO NOTHING"
+  ).run(req.user.id, name);
+  const row = db
+    .prepare("SELECT * FROM sub_ignores WHERE user_id = ? AND name = ?")
+    .get(req.user.id, name);
+  res.status(201).json(row);
+});
+
+app.delete("/api/sub-ignores/:id", auth, (req, res) => {
+  const info = db
+    .prepare("DELETE FROM sub_ignores WHERE id = ? AND user_id = ?")
+    .run(req.params.id, req.user.id);
+  if (info.changes === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
 // ---- Serve built frontend (production single-server mode) ---------------
 const clientDist = path.join(__dirname, "..", "client", "dist");
 if (fs.existsSync(clientDist)) {

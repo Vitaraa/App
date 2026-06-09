@@ -50,11 +50,15 @@ export function detectSubscriptions(txns) {
 }
 
 // Merge manual subscriptions with auto-detected ones (manual wins on name
-// collision) and compute summary totals.
-export function mergeSubscriptions(manual, txns) {
+// collision) and compute summary totals. `ignores` is a list of auto-detected
+// names the user has dismissed as false positives — they're excluded.
+export function mergeSubscriptions(manual, txns, ignores = []) {
   const manualList = (manual || []).map((s) => ({ ...s, source: "manual" }));
   const manualNames = new Set(manualList.map((s) => s.name.toUpperCase()));
-  const auto = detectSubscriptions(txns).filter((s) => !manualNames.has(s.name.toUpperCase()));
+  const ignored = new Set((ignores || []).map((n) => String(n).toUpperCase()));
+  const auto = detectSubscriptions(txns).filter(
+    (s) => !manualNames.has(s.name.toUpperCase()) && !ignored.has(s.name.toUpperCase())
+  );
   const all = [...manualList, ...auto];
 
   const monthly = all.filter((s) => s.cadence !== "annual");

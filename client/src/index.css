@@ -729,8 +729,61 @@ select:focus {
 .sub-amt .muted {
   font-size: 0.72rem;
 }
-.x-spacer {
-  width: 24px;
+.sub-restore {
+  align-self: flex-start;
+  font-size: 0.8rem;
+}
+
+/* Spending drill-down */
+.hint-sm {
+  margin: 0;
+  font-size: 0.78rem;
+}
+.drill {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.drill-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.drill-head strong {
+  font-size: 0.95rem;
+}
+.drill-head .link {
+  margin-left: auto;
+}
+.drill-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.drill-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.86rem;
+}
+.drill-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drill-cat {
+  font-size: 0.74rem;
+}
+.drill-date {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Recent transactions (medium widget) */

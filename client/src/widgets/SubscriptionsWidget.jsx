@@ -7,6 +7,7 @@ const fmt = (n) =>
 
 export default function SubscriptionsWidget({ txns }) {
   const [manual, setManual] = useState([]);
+  const [ignores, setIgnores] = useState([]); // [{id, name}]
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
@@ -14,7 +15,9 @@ export default function SubscriptionsWidget({ txns }) {
 
   async function load() {
     try {
-      setManual(await api.listSubscriptions());
+      const [subs, ig] = await Promise.all([api.listSubscriptions(), api.listSubIgnores()]);
+      setManual(subs);
+      setIgnores(ig);
     } catch {
       /* ignore */
     }
@@ -23,7 +26,11 @@ export default function SubscriptionsWidget({ txns }) {
     load();
   }, []);
 
-  const merged = useMemo(() => mergeSubscriptions(manual, txns), [manual, txns]);
+  const ignoreNames = useMemo(() => ignores.map((i) => i.name), [ignores]);
+  const merged = useMemo(
+    () => mergeSubscriptions(manual, txns, ignoreNames),
+    [manual, txns, ignoreNames]
+  );
 
   async function addSub(e) {
     e.preventDefault();
@@ -35,8 +42,18 @@ export default function SubscriptionsWidget({ txns }) {
     setAdding(false);
     load();
   }
-  async function remove(id) {
+  async function removeManual(id) {
     await api.deleteSubscription(id);
+    load();
+  }
+  // Dismiss an auto-detected false positive (it isn't stored, so we add its
+  // name to the ignore list and it stops being detected).
+  async function dismissAuto(subName) {
+    await api.ignoreSubscription(subName);
+    load();
+  }
+  async function restoreAll() {
+    await Promise.all(ignores.map((i) => api.unignoreSubscription(i.id)));
     load();
   }
 
@@ -91,13 +108,25 @@ export default function SubscriptionsWidget({ txns }) {
               <span className="sub-cad muted">{s.cadence === "annual" ? "yr" : "mo"}</span>
               <span className="sub-amt">{fmt(monthlyCost(s))}<span className="muted">/mo</span></span>
               {s.source === "manual" ? (
-                <button className="x" title="Delete" onClick={() => remove(s.id)}>×</button>
+                <button className="x" title="Delete subscription" onClick={() => removeManual(s.id)}>×</button>
               ) : (
-                <span className="x-spacer" />
+                <button
+                  className="x"
+                  title="Not a subscription — dismiss"
+                  onClick={() => dismissAuto(s.name)}
+                >
+                  ×
+                </button>
               )}
             </li>
           ))}
         </ul>
+      )}
+
+      {ignores.length > 0 && (
+        <button className="link sub-restore" onClick={restoreAll}>
+          {ignores.length} dismissed · Restore
+        </button>
       )}
     </section>
   );
