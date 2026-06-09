@@ -39,12 +39,13 @@ export function computeInsights(txns) {
   // so we require BOTH ≥2 distinct months AND a span of at least ~45 days before
   // drawing month-over-month / recurring conclusions — otherwise the numbers are
   // noise.
+  const MIN_TRANSACTIONS = 50;
   const dates = txns.map((t) => String(t.date)).filter(Boolean).sort();
   const distinctMonths = new Set(dates.map((d) => d.slice(0, 7))).size;
   const spanDays = dates.length
     ? (new Date(dates[dates.length - 1]) - new Date(dates[0])) / 86400000
     : 0;
-  if (txns.length === 0 || distinctMonths < 2 || spanDays < 45) {
+  if (txns.length < MIN_TRANSACTIONS || distinctMonths < 2 || spanDays < 45) {
     return [
       {
         kind: "waiting",
