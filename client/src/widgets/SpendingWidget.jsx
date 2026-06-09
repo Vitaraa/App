@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -30,6 +30,16 @@ export default function SpendingWidget({ txns }) {
     setSelected(null);
   }
 
+  // Close the drill-down popup on Escape.
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setSelected(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected]);
+
   // Clicking a bar selects that period (toggles off if clicked again).
   function pickBar(state) {
     const p = state?.activePayload?.[0]?.payload;
@@ -45,7 +55,7 @@ export default function SpendingWidget({ txns }) {
   const drillTotal = drill.reduce((s, t) => s + t.amount, 0);
 
   return (
-    <section className="card widget widget-lg">
+    <section className="card widget widget-lg spend-widget">
       <div className="widget-head">
         <div>
           <span className="muted">Spending</span>
@@ -80,28 +90,34 @@ export default function SpendingWidget({ txns }) {
       )}
 
       {selected && (
-        <div className="drill">
-          <div className="drill-head">
-            <strong>{periodLabel(selected, gran)}</strong>
-            <span className="neg">{fmtFull(drillTotal)}</span>
-            <button className="link" onClick={() => setSelected(null)}>Close</button>
+        <div className="drill-overlay" onClick={() => setSelected(null)}>
+          <div className="drill-pop" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="drill-head">
+              <div className="drill-title">
+                <strong>{periodLabel(selected, gran)}</strong>
+                <span className="neg">{fmtFull(drillTotal)}</span>
+              </div>
+              <button className="drill-close" onClick={() => setSelected(null)} aria-label="Close" title="Close">
+                ×
+              </button>
+            </div>
+            {drill.length === 0 ? (
+              <p className="muted sm">No expenses in this period.</p>
+            ) : (
+              <ul className="drill-list">
+                {drill.map((t) => (
+                  <li key={t.id}>
+                    <span className="drill-name" title={t.description || t.category}>
+                      {t.description ? shortenMerchant(t.description) : t.category}
+                    </span>
+                    <span className="muted drill-cat">{t.category}</span>
+                    <span className="muted drill-date">{t.date.slice(5)}</span>
+                    <span className="neg">{fmtFull(t.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          {drill.length === 0 ? (
-            <p className="muted sm">No expenses in this period.</p>
-          ) : (
-            <ul className="drill-list">
-              {drill.map((t) => (
-                <li key={t.id}>
-                  <span className="drill-name" title={t.description || t.category}>
-                    {t.description ? shortenMerchant(t.description) : t.category}
-                  </span>
-                  <span className="muted drill-cat">{t.category}</span>
-                  <span className="muted drill-date">{t.date.slice(5)}</span>
-                  <span className="neg">{fmtFull(t.amount)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       )}
     </section>

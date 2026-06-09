@@ -734,28 +734,63 @@ select:focus {
   font-size: 0.8rem;
 }
 
-/* Spending drill-down */
+/* Spending drill-down popup */
 .hint-sm {
   margin: 0;
   font-size: 0.78rem;
 }
-.drill {
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
+.spend-widget {
+  position: relative;
+}
+.drill-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 10;
+}
+.drill-pop {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  width: 100%;
+  max-width: 440px;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  padding: 16px;
 }
 .drill-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
 }
-.drill-head strong {
-  font-size: 0.95rem;
+.drill-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
 }
-.drill-head .link {
-  margin-left: auto;
+.drill-title strong {
+  font-size: 1rem;
+}
+.drill-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.drill-close:hover {
+  color: var(--red);
 }
 .drill-list {
   list-style: none;
