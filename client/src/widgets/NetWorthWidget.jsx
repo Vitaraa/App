@@ -21,10 +21,6 @@ export default function NetWorthWidget({ txns }) {
   const [gran, setGran] = useState("month");
   const [mode, setMode] = useState("transactions"); // transactions | accounts
   const [accounts, setAccounts] = useState([]);
-  const [showAccts, setShowAccts] = useState(false);
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState("asset");
-  const [balance, setBalance] = useState("");
 
   async function loadAccounts() {
     try {
@@ -44,26 +40,6 @@ export default function NetWorthWidget({ txns }) {
     [txns, gran, anchor]
   );
   const current = series.length ? series[series.length - 1].value : anchor || 0;
-
-  async function addAccount(e) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    await api.addAccount({ name: name.trim(), kind, balance: Number(balance) || 0 });
-    setName("");
-    setBalance("");
-    setKind("asset");
-    loadAccounts();
-  }
-  async function updateBalance(a, value) {
-    const bal = Number(value);
-    if (!Number.isFinite(bal) || bal === a.balance) return;
-    await api.updateAccount(a.id, { balance: bal });
-    loadAccounts();
-  }
-  async function removeAccount(id) {
-    await api.deleteAccount(id);
-    loadAccounts();
-  }
 
   return (
     <section className="card widget widget-lg">
@@ -95,7 +71,7 @@ export default function NetWorthWidget({ txns }) {
 
       {mode === "accounts" && accounts.length === 0 && (
         <p className="muted hint-line">
-          Add accounts below to anchor the curve to your real net worth.
+          Add accounts in the Accounts tab to anchor the curve to your real net worth.
         </p>
       )}
 
@@ -114,44 +90,6 @@ export default function NetWorthWidget({ txns }) {
             <Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
-      )}
-
-      <button className="link accts-toggle" onClick={() => setShowAccts((v) => !v)}>
-        {showAccts ? "Hide accounts" : `Accounts (${accounts.length})`}
-      </button>
-
-      {showAccts && (
-        <div className="accts">
-          {accounts.map((a) => (
-            <div key={a.id} className="acct-row">
-              <span className="acct-name">{a.name}</span>
-              <span className={`acct-kind ${a.kind}`}>{a.kind}</span>
-              <input
-                className="acct-bal"
-                type="number"
-                step="0.01"
-                defaultValue={a.balance}
-                onBlur={(e) => updateBalance(a, e.target.value)}
-              />
-              <button className="x" title="Delete" onClick={() => removeAccount(a.id)}>×</button>
-            </div>
-          ))}
-          <form className="acct-add" onSubmit={addAccount}>
-            <input placeholder="Account name" value={name} onChange={(e) => setName(e.target.value)} />
-            <select value={kind} onChange={(e) => setKind(e.target.value)}>
-              <option value="asset">Asset</option>
-              <option value="liability">Liability</option>
-            </select>
-            <input
-              type="number"
-              step="0.01"
-              placeholder="Balance"
-              value={balance}
-              onChange={(e) => setBalance(e.target.value)}
-            />
-            <button className="btn primary sm">Add</button>
-          </form>
-        </div>
       )}
     </section>
   );

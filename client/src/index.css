@@ -838,6 +838,105 @@ select:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* ============================== Accounts tab ============================== */
+.accounts-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.acct-addbar {
+  display: flex;
+}
+.acct-groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.acct-group {
+  display: flex;
+  flex-direction: column;
+}
+.acct-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.acct-item {
+  display: grid;
+  grid-template-columns: 40px 1fr 110px auto 24px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+.acct-item:first-of-type {
+  border-top: none;
+}
+.inst-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.acct-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.acct-itemname {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acct-type {
+  font-size: 0.76rem;
+}
+.acct-itembal {
+  width: 100%;
+  margin-top: 0;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+  text-align: right;
+}
+.link.sm {
+  font-size: 0.8rem;
+}
+
+/* Add / edit account form */
+.acct-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.acct-form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.acct-form input,
+.acct-form select {
+  margin-top: 0;
+}
+.acct-form-row > input,
+.acct-form-row > select {
+  flex: 1;
+  min-width: 0;
+}
+.btn.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
 @media (max-width: 1100px) {
   .dash-medium {
     grid-template-columns: 1fr 1fr;
@@ -845,7 +944,8 @@ select:focus {
 }
 @media (max-width: 760px) {
   .dash-large,
-  .dash-medium {
+  .dash-medium,
+  .acct-groups {
     grid-template-columns: 1fr;
   }
 }

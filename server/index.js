@@ -222,6 +222,17 @@ app.delete("/api/transactions/:id", auth, (req, res) => {
 });
 
 // ---- Accounts (for net worth) -------------------------------------------
+// Map a fine-grained account type to its net-worth sign. Assets count
+// positively, liabilities negatively. Keep in sync with client institutions.js.
+const TYPE_KIND = {
+  chequing: "asset", savings: "asset", investment: "asset", cash: "asset", other_asset: "asset",
+  credit_card: "liability", mortgage: "liability", auto_loan: "liability",
+  line_of_credit: "liability", student_loan: "liability", loan: "liability", other_liability: "liability",
+};
+function kindForType(type, fallback) {
+  return TYPE_KIND[type] || fallback || "asset";
+}
+
 app.get("/api/accounts", auth, (req, res) => {
   res.json(
     db.prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY id").all(req.user.id)
@@ -229,14 +240,16 @@ app.get("/api/accounts", auth, (req, res) => {
 });
 
 app.post("/api/accounts", auth, (req, res) => {
-  const { name, kind, balance } = req.body || {};
+  const { name, kind, balance, type, institution } = req.body || {};
   if (!name || !String(name).trim())
     return res.status(400).json({ error: "name is required" });
-  const k = kind === "liability" ? "liability" : "asset";
-  const bal = Number(balance) || 0;
+  const t = type && TYPE_KIND[type] ? type : kind === "liability" ? "other_liability" : "other_asset";
+  const k = kindForType(t, kind === "liability" ? "liability" : "asset");
   const info = db
-    .prepare("INSERT INTO accounts (user_id, name, kind, balance) VALUES (?, ?, ?, ?)")
-    .run(req.user.id, String(name).trim(), k, bal);
+    .prepare(
+      "INSERT INTO accounts (user_id, name, kind, balance, type, institution) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .run(req.user.id, String(name).trim(), k, Number(balance) || 0, t, String(institution || "other"));
   res.status(201).json(db.prepare("SELECT * FROM accounts WHERE id = ?").get(info.lastInsertRowid));
 });
 
@@ -245,13 +258,22 @@ app.patch("/api/accounts/:id", auth, (req, res) => {
     .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")
     .get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: "Not found" });
-  const { name, kind, balance } = req.body || {};
+  const { name, kind, balance, type, institution } = req.body || {};
+  const nextType = type && TYPE_KIND[type] ? type : row.type;
+  // kind follows the type; an explicit kind only applies when no type is known.
+  const nextKind = type
+    ? kindForType(nextType)
+    : kind === "asset" || kind === "liability"
+    ? kind
+    : row.kind;
   db.prepare(
-    "UPDATE accounts SET name = ?, kind = ?, balance = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
+    "UPDATE accounts SET name = ?, kind = ?, balance = ?, type = ?, institution = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
   ).run(
     name != null ? String(name).trim() : row.name,
-    kind === "asset" || kind === "liability" ? kind : row.kind,
+    nextKind,
     balance != null ? Number(balance) || 0 : row.balance,
+    nextType,
+    institution != null ? String(institution) : row.institution,
     row.id,
     req.user.id
   );

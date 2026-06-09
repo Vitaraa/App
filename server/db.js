@@ -111,4 +111,14 @@ if (!txCols.includes("source")) {
   addColumn("ALTER TABLE transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
 }
 
+// accounts gained a finer `type` and an `institution` (for the icon badge) in
+// the Accounts tab release; older account rows predate them.
+const acctCols = db.prepare("PRAGMA table_info(accounts)").all().map((c) => c.name);
+if (!acctCols.includes("type")) {
+  addColumn("ALTER TABLE accounts ADD COLUMN type TEXT NOT NULL DEFAULT 'other_asset'");
+}
+if (!acctCols.includes("institution")) {
+  addColumn("ALTER TABLE accounts ADD COLUMN institution TEXT NOT NULL DEFAULT 'other'");
+}
+
 export default db;

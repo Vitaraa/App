@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "./AuthContext.jsx";
 import { api } from "./api.js";
 import Transactions from "./Transactions.jsx";
+import AccountsTab from "./AccountsTab.jsx";
 import NetWorthWidget from "./widgets/NetWorthWidget.jsx";
 import SpendingWidget from "./widgets/SpendingWidget.jsx";
 import RecentWidget from "./widgets/RecentWidget.jsx";
@@ -53,12 +54,20 @@ export default function Dashboard() {
         >
           Transactions
         </button>
+        <button
+          className={`tab ${tab === "accounts" ? "tab-on" : ""}`}
+          onClick={() => setTab("accounts")}
+        >
+          Accounts
+        </button>
       </nav>
 
       {error && <div className="error">{error}</div>}
 
       {tab === "transactions" ? (
         <Transactions txns={txns} reload={load} />
+      ) : tab === "accounts" ? (
+        <AccountsTab />
       ) : (
         <>
           <div className="dash-grid dash-large">
