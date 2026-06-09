@@ -34,6 +34,26 @@ function merchantKey(t) {
 }
 
 export function computeInsights(txns) {
+  // Gate analysis until there's enough history. A single statement spans roughly
+  // one month even though it can straddle two calendar months (e.g. Apr 15–May 14),
+  // so we require BOTH ≥2 distinct months AND a span of at least ~45 days before
+  // drawing month-over-month / recurring conclusions — otherwise the numbers are
+  // noise.
+  const dates = txns.map((t) => String(t.date)).filter(Boolean).sort();
+  const distinctMonths = new Set(dates.map((d) => d.slice(0, 7))).size;
+  const spanDays = dates.length
+    ? (new Date(dates[dates.length - 1]) - new Date(dates[0])) / 86400000
+    : 0;
+  if (txns.length === 0 || distinctMonths < 2 || spanDays < 45) {
+    return [
+      {
+        kind: "waiting",
+        severity: "info",
+        text: "Insights are waiting on enough information to provide you the best analysis — import at least two months of transactions and check back.",
+      },
+    ];
+  }
+
   const expenses = txns.filter((t) => t.type === "expense");
   const insights = [];
 
