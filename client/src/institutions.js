@@ -1,5 +1,5 @@
 // Presets for the Accounts tab: Canadian financial-institution badges (colored
-// monograms — not official logos) and account types with their net-worth sign.
+// monograms — not official logos), account types, and display groups.
 
 export const INSTITUTIONS = [
   { key: "rbc", label: "RBC", abbr: "RBC", bg: "#0051A5", fg: "#FEDF01" },
@@ -20,33 +20,58 @@ export const INSTITUTIONS = [
   { key: "other", label: "Other", abbr: "—", bg: "#2A2F3A", fg: "#9AA3B2" },
 ];
 
-// Each account type maps to a net-worth sign: assets add, liabilities subtract.
-export const ACCOUNT_TYPES = [
-  { key: "chequing", label: "Chequing", kind: "asset" },
-  { key: "savings", label: "Savings", kind: "asset" },
-  { key: "investment", label: "Investment", kind: "asset" },
+// Display groups. The group also determines net-worth sign (asset/liability).
+export const GROUPS = [
   { key: "cash", label: "Cash", kind: "asset" },
-  { key: "other_asset", label: "Other asset", kind: "asset" },
-  { key: "credit_card", label: "Credit Card", kind: "liability" },
-  { key: "mortgage", label: "Mortgage", kind: "liability" },
-  { key: "auto_loan", label: "Auto Loan", kind: "liability" },
-  { key: "line_of_credit", label: "Line of Credit", kind: "liability" },
-  { key: "student_loan", label: "Student Loan", kind: "liability" },
-  { key: "loan", label: "Other Loan", kind: "liability" },
-  { key: "other_liability", label: "Other liability", kind: "liability" },
+  { key: "investments", label: "Investments", kind: "asset" },
+  { key: "credit_cards", label: "Credit Cards", kind: "liability" },
+  { key: "loans", label: "Loans", kind: "liability" },
 ];
+
+// Account types shown in the add form. `group` is the default display group;
+// "other" has no fixed group — the user picks one when adding it.
+export const ACCOUNT_TYPES = [
+  { key: "chequing", label: "Chequing", group: "cash" },
+  { key: "savings", label: "Savings", group: "cash" },
+  { key: "cash", label: "Cash", group: "cash" },
+  { key: "investment", label: "Investment", group: "investments" },
+  { key: "credit_card", label: "Credit Card", group: "credit_cards" },
+  { key: "mortgage", label: "Mortgage", group: "loans" },
+  { key: "line_of_credit", label: "Line of Credit", group: "loans" },
+  { key: "student_loan", label: "Student Loan", group: "loans" },
+  { key: "auto_loan", label: "Auto Loan", group: "loans" },
+  { key: "other", label: "Other", group: "" },
+];
+
+// type -> default group (also covers legacy other_asset / other_liability).
+const TYPE_GROUP = {
+  chequing: "cash", savings: "cash", cash: "cash", other_asset: "cash",
+  investment: "investments",
+  credit_card: "credit_cards",
+  mortgage: "loans", auto_loan: "loans", line_of_credit: "loans",
+  student_loan: "loans", loan: "loans", other_liability: "loans",
+};
 
 export function institutionFor(key) {
   return INSTITUTIONS.find((i) => i.key === key) || INSTITUTIONS[INSTITUTIONS.length - 1];
 }
-export function typeFor(key) {
-  return ACCOUNT_TYPES.find((t) => t.key === key);
+export function groupForType(type) {
+  return TYPE_GROUP[type] || "cash";
+}
+export function groupFor(key) {
+  return GROUPS.find((g) => g.key === key) || GROUPS[0];
+}
+export function kindForGroup(group) {
+  const g = GROUPS.find((x) => x.key === group);
+  return g ? g.kind : "asset";
+}
+// An account's effective group: the stored group, else derived from its type.
+export function accountGroup(a) {
+  return a.account_group || groupForType(a.type);
 }
 export function typeLabel(key) {
-  const t = typeFor(key);
-  return t ? t.label : "Account";
-}
-export function kindForType(type, fallback = "asset") {
-  const t = typeFor(type);
-  return t ? t.kind : fallback;
+  const t = ACCOUNT_TYPES.find((x) => x.key === key);
+  if (t) return t.label;
+  if (key === "other_asset" || key === "other_liability") return "Other";
+  return "Account";
 }

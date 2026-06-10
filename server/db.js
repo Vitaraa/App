@@ -137,5 +137,10 @@ if (!acctCols.includes("type")) {
 if (!acctCols.includes("institution")) {
   addColumn("ALTER TABLE accounts ADD COLUMN institution TEXT NOT NULL DEFAULT 'other'");
 }
+if (!acctCols.includes("account_group")) {
+  // Display group: cash | investments | credit_cards | loans. ('group' is a SQL
+  // keyword, so the column is named account_group.) Empty = derive from type.
+  addColumn("ALTER TABLE accounts ADD COLUMN account_group TEXT NOT NULL DEFAULT ''");
+}
 
 export default db;

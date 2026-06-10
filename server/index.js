@@ -225,16 +225,26 @@ app.delete("/api/transactions/:id", auth, (req, res) => {
 });
 
 // ---- Accounts (for net worth) -------------------------------------------
-// Map a fine-grained account type to its net-worth sign. Assets count
-// positively, liabilities negatively. Keep in sync with client institutions.js.
-const TYPE_KIND = {
-  chequing: "asset", savings: "asset", investment: "asset", cash: "asset", other_asset: "asset",
-  credit_card: "liability", mortgage: "liability", auto_loan: "liability",
-  line_of_credit: "liability", student_loan: "liability", loan: "liability", other_liability: "liability",
+// Accounts are organized into display groups; the group also sets the
+// net-worth sign. Keep in sync with client institutions.js.
+const GROUP_KIND = {
+  cash: "asset",
+  investments: "asset",
+  credit_cards: "liability",
+  loans: "liability",
 };
-function kindForType(type, fallback) {
-  return TYPE_KIND[type] || fallback || "asset";
-}
+const VALID_GROUPS = new Set(Object.keys(GROUP_KIND));
+// type -> default group (covers legacy other_asset / other_liability rows).
+const TYPE_GROUP = {
+  chequing: "cash", savings: "cash", cash: "cash", other_asset: "cash",
+  investment: "investments",
+  credit_card: "credit_cards",
+  mortgage: "loans", auto_loan: "loans", line_of_credit: "loans",
+  student_loan: "loans", loan: "loans", other_liability: "loans",
+};
+const groupForType = (type) => TYPE_GROUP[type] || "cash";
+// A chosen group (for "other" types) wins; otherwise derive from the type.
+const resolveGroup = (type, group) => (VALID_GROUPS.has(group) ? group : groupForType(type));
 
 // Compute market value + cost basis for a set of holdings using live quotes.
 function valueHoldings(holdings, quotes) {
@@ -274,11 +284,16 @@ app.get("/api/accounts", auth, async (req, res) => {
   }
 
   const out = accts.map((a) => {
+    const group = a.account_group || groupForType(a.type);
+    const kind = GROUP_KIND[group] || a.kind;
     if (a.type === "investment") {
       const { value, cost } = valueHoldings(byAccount[a.id] || [], quotes);
-      return { ...a, value, cost, growth: round2(value - cost), holdingsCount: (byAccount[a.id] || []).length };
+      return {
+        ...a, account_group: group, kind, value, cost,
+        growth: round2(value - cost), holdingsCount: (byAccount[a.id] || []).length,
+      };
     }
-    return { ...a, value: a.balance };
+    return { ...a, account_group: group, kind, value: a.balance };
   });
   res.json(out);
 });
@@ -504,16 +519,17 @@ app.get("/api/quotes", auth, async (req, res) => {
 });
 
 app.post("/api/accounts", auth, (req, res) => {
-  const { name, kind, balance, type, institution } = req.body || {};
+  const { name, balance, type, institution, group } = req.body || {};
   if (!name || !String(name).trim())
     return res.status(400).json({ error: "name is required" });
-  const t = type && TYPE_KIND[type] ? type : kind === "liability" ? "other_liability" : "other_asset";
-  const k = kindForType(t, kind === "liability" ? "liability" : "asset");
+  const t = type && (TYPE_GROUP[type] || type === "other") ? type : "other";
+  const grp = resolveGroup(t, group);
+  const k = GROUP_KIND[grp] || "asset";
   const info = db
     .prepare(
-      "INSERT INTO accounts (user_id, name, kind, balance, type, institution) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO accounts (user_id, name, kind, balance, type, institution, account_group) VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
-    .run(req.user.id, String(name).trim(), k, Number(balance) || 0, t, String(institution || "other"));
+    .run(req.user.id, String(name).trim(), k, Number(balance) || 0, t, String(institution || "other"), grp);
   res.status(201).json(db.prepare("SELECT * FROM accounts WHERE id = ?").get(info.lastInsertRowid));
 });
 
@@ -522,22 +538,19 @@ app.patch("/api/accounts/:id", auth, (req, res) => {
     .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")
     .get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: "Not found" });
-  const { name, kind, balance, type, institution } = req.body || {};
-  const nextType = type && TYPE_KIND[type] ? type : row.type;
-  // kind follows the type; an explicit kind only applies when no type is known.
-  const nextKind = type
-    ? kindForType(nextType)
-    : kind === "asset" || kind === "liability"
-    ? kind
-    : row.kind;
+  const { name, balance, type, institution, group } = req.body || {};
+  const nextType = type && (TYPE_GROUP[type] || type === "other") ? type : row.type;
+  const nextGroup = resolveGroup(nextType, group != null ? group : row.account_group);
+  const nextKind = GROUP_KIND[nextGroup] || row.kind;
   db.prepare(
-    "UPDATE accounts SET name = ?, kind = ?, balance = ?, type = ?, institution = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
+    "UPDATE accounts SET name = ?, kind = ?, balance = ?, type = ?, institution = ?, account_group = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
   ).run(
     name != null ? String(name).trim() : row.name,
     nextKind,
     balance != null ? Number(balance) || 0 : row.balance,
     nextType,
     institution != null ? String(institution) : row.institution,
+    nextGroup,
     row.id,
     req.user.id
   );

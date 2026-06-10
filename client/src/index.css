@@ -873,6 +873,17 @@ select:focus {
   flex-direction: column;
   gap: 16px;
 }
+.networth-card {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.networth-card strong {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
 .acct-addbar {
   display: flex;
 }
