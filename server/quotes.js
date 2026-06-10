@@ -88,6 +88,43 @@ export async function getQuotes(symbols) {
 
 export const quoteProvider = FINNHUB_KEY ? "finnhub" : "yahoo";
 
+// Daily historical closes for a symbol from `period1Sec` (unix seconds) to now,
+// via Yahoo's chart endpoint (no key). Returns [{ date:"YYYY-MM-DD", close }]
+// sorted ascending. Cached for several hours.
+const histCache = new Map(); // SYMBOL -> { points, ts }
+const HIST_TTL = 6 * 60 * 60 * 1000;
+
+export async function getHistory(symbol, period1Sec) {
+  const sym = String(symbol || "").toUpperCase().trim();
+  if (!sym) return [];
+  const cached = histCache.get(sym);
+  if (cached && Date.now() - cached.ts < HIST_TTL) return cached.points;
+
+  const now = Math.floor(Date.now() / 1000);
+  const p1 = Math.min(period1Sec || now - 365 * 24 * 3600, now);
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+      sym
+    )}?period1=${p1}&period2=${now}&interval=1d`;
+    const r = await fetchWithTimeout(url, { headers: { "User-Agent": "Mozilla/5.0" } }, 8000);
+    if (!r.ok) throw new Error(`yahoo hist ${r.status}`);
+    const j = await r.json();
+    const res = j?.chart?.result?.[0];
+    const ts = res?.timestamp || [];
+    const closes = res?.indicators?.quote?.[0]?.close || [];
+    const points = [];
+    for (let i = 0; i < ts.length; i++) {
+      const c = closes[i];
+      if (c == null) continue;
+      points.push({ date: new Date(ts[i] * 1000).toISOString().slice(0, 10), close: c });
+    }
+    histCache.set(sym, { points, ts: Date.now() });
+    return points;
+  } catch {
+    return cached ? cached.points : [];
+  }
+}
+
 // Symbol search for the ticker autocomplete. Returns
 // [{ symbol, description, exchange }]. Uses Finnhub when keyed, else Yahoo.
 const searchCache = new Map(); // q -> { results, ts }

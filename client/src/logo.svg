@@ -1,0 +1,12 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cloud -->
+  <path d="M80 176C53 176 32 156 32 130C32 106 49 86 72 82C80 55 104 36 132 36C166 36 194 60 200 92C221 97 236 115 236 136C236 158 218 176 196 176H80Z" stroke="#FFFFFF" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"></path>
+
+  <!-- Growth bars -->
+  <path d="M96 148V116" stroke="#22C55E" stroke-width="14" stroke-linecap="round"></path>
+
+  <path d="M128 148V100" stroke="#22C55E" stroke-width="14" stroke-linecap="round"></path>
+
+  <!-- Loss bar -->
+  <path d="M160 148V128" stroke="#EF4444" stroke-width="14" stroke-linecap="round"></path>
+</svg>

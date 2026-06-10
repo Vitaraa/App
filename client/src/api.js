@@ -47,6 +47,7 @@ export const api = {
   // Investment holdings (inside an investment account)
   searchSymbols: (q) => request(`/symbol-search?q=${encodeURIComponent(q)}`),
   listAllHoldings: () => request("/holdings"),
+  investmentHistory: () => request("/investments/history"),
   listHoldings: (accountId) => request(`/accounts/${accountId}/holdings`),
   addHolding: (accountId, h) =>
     request(`/accounts/${accountId}/holdings`, { method: "POST", body: h }),

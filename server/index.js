@@ -8,7 +8,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import db from "./db.js";
 import { categorize, merchantToken, normalizeDescription } from "./categorize.js";
-import { getQuotes, searchSymbols } from "./quotes.js";
+import { getQuotes, searchSymbols, getHistory } from "./quotes.js";
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
@@ -403,6 +403,81 @@ app.delete("/api/holdings/:id", auth, (req, res) => {
     .run(req.params.id, req.user.id);
   if (info.changes === 0) return res.status(404).json({ error: "Not found" });
   res.json({ ok: true });
+});
+
+// Portfolio value/cost over time (monthly samples) for the investments line
+// chart. Uses historical daily closes; falls back to cost basis for any ticker
+// whose history can't be fetched, so the line always renders.
+function monthStarts(startStr) {
+  const out = [];
+  const d = new Date(startStr + "T00:00:00Z");
+  d.setUTCDate(1);
+  const now = new Date();
+  while (d <= now) {
+    out.push(d.toISOString().slice(0, 10));
+    d.setUTCMonth(d.getUTCMonth() + 1);
+  }
+  return out;
+}
+
+app.get("/api/investments/history", auth, async (req, res) => {
+  const holds = db
+    .prepare("SELECT * FROM holdings WHERE user_id = ? ORDER BY purchase_date")
+    .all(req.user.id);
+  if (!holds.length) return res.json([]);
+
+  const dated = holds.map((h) => h.purchase_date).filter(Boolean).sort();
+  const startStr = dated[0] || new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const startSec = Math.floor(new Date(startStr + "T00:00:00Z").getTime() / 1000);
+
+  const tickers = [...new Set(holds.map((h) => h.ticker))];
+  const histByTicker = {};
+  await Promise.all(
+    tickers.map(async (t) => {
+      histByTicker[t.toUpperCase()] = await getHistory(t, startSec);
+    })
+  );
+  let quotes = {};
+  try {
+    quotes = await getQuotes(tickers);
+  } catch {
+    quotes = {};
+  }
+
+  // close on or before a date for a ticker (binary search; null if none)
+  function closeAt(ticker, date) {
+    const pts = histByTicker[ticker.toUpperCase()] || [];
+    let lo = 0;
+    let hi = pts.length - 1;
+    let ans = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (pts[mid].date <= date) {
+        ans = pts[mid].close;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return ans;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const samples = monthStarts(startStr);
+  if (samples[samples.length - 1] !== today) samples.push(today);
+
+  const series = samples.map((date) => {
+    let value = 0;
+    let cost = 0;
+    for (const h of holds) {
+      const pd = h.purchase_date || startStr;
+      if (pd > date) continue;
+      cost += h.purchase_price * h.quantity;
+      const live = date === today ? quotes[h.ticker.toUpperCase()] : null;
+      const price = live != null ? live : closeAt(h.ticker, date) ?? h.purchase_price;
+      value += price * h.quantity;
+    }
+    return { date, value: round2(value), cost: round2(cost) };
+  });
+  res.json(series);
 });
 
 // Ticker autocomplete search.

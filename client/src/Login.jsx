@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "./AuthContext.jsx";
+import logo from "./logo.svg";
 
 export default function Login() {
   const { login, register } = useAuth();
@@ -26,7 +27,10 @@ export default function Login() {
   return (
     <div className="auth-wrap">
       <form className="card auth-card" onSubmit={submit}>
-        <h1 className="brand">Budget</h1>
+        <h1 className="brand brand-center">
+          <img src={logo} className="brand-logo" alt="" />
+          Claud
+        </h1>
         <p className="muted">
           {mode === "login" ? "Sign in to your account" : "Create an account"}
         </p>

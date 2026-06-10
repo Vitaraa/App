@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "./AuthContext.jsx";
 import { api } from "./api.js";
+import logo from "./logo.svg";
 import Transactions from "./Transactions.jsx";
 import AccountsTab from "./AccountsTab.jsx";
 import NetWorthWidget from "./widgets/NetWorthWidget.jsx";
@@ -32,7 +33,10 @@ export default function Dashboard() {
   return (
     <div className="page page-wide">
       <header className="topbar">
-        <h1 className="brand">Budget</h1>
+        <h1 className="brand">
+          <img src={logo} className="brand-logo" alt="" />
+          Claud
+        </h1>
         <div className="user">
           <span className="muted">{username}</span>
           <button className="link" onClick={logout}>

@@ -37,6 +37,17 @@ body {
   margin: 0;
   font-weight: 600;
   letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-logo {
+  width: 30px;
+  height: 30px;
+  display: block;
+}
+.brand-center {
+  justify-content: center;
 }
 
 .card {
