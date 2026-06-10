@@ -35,6 +35,26 @@ export function spendingSeries(txns, granularity) {
     .map((k) => ({ period: k, label: periodLabel(k, granularity), value: round2(map[k]) }));
 }
 
+// Income vs expense (and net) per period — for the Cash Flow page.
+export function cashFlowSeries(txns, granularity) {
+  const map = {};
+  for (const t of txns) {
+    const k = bucketKey(t.date, granularity);
+    (map[k] ||= { income: 0, expense: 0 });
+    if (t.type === "income") map[k].income += Number(t.amount || 0);
+    else map[k].expense += Number(t.amount || 0);
+  }
+  return Object.keys(map)
+    .sort((a, b) => a.localeCompare(b))
+    .map((k) => ({
+      period: k,
+      label: periodLabel(k, granularity),
+      income: round2(map[k].income),
+      expense: round2(map[k].expense),
+      net: round2(map[k].income - map[k].expense),
+    }));
+}
+
 // Cumulative net balance (income − expense) sampled at the end of each period.
 // If `anchorTotal` is provided, the whole curve is shifted so the final point
 // equals that value — used for the "from accounts" net-worth view, which anchors

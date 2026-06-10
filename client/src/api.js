@@ -68,6 +68,10 @@ export const api = {
     request(`/subscriptions/${id}`, { method: "PATCH", body: patch }),
   deleteSubscription: (id) => request(`/subscriptions/${id}`, { method: "DELETE" }),
 
+  // Budgets (per-category monthly limits)
+  listBudgets: () => request("/budgets"),
+  setBudget: (category, amount) => request("/budgets", { method: "POST", body: { category, amount } }),
+
   // Dismissed auto-detected subscriptions
   listSubIgnores: () => request("/sub-ignores"),
   ignoreSubscription: (name) => request("/sub-ignores", { method: "POST", body: { name } }),
