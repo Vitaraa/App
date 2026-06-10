@@ -1743,6 +1743,21 @@ select:focus {
   font-weight: 600;
   white-space: nowrap;
 }
+.contrib-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.contrib-amount {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+}
+.contrib-card p {
+  margin: 2px 0 0;
+  line-height: 1.5;
+}
 
 @media (max-width: 820px) {
   .plan-grid {
