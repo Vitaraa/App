@@ -190,7 +190,8 @@ function AccountModal({ initial, onSubmit, onClose }) {
                     const file = e.target.files?.[0];
                     if (file) {
                       try {
-                        setF((prev) => ({ ...prev, icon: await fileToIcon(file) }));
+                        const icon = await fileToIcon(file);
+                        setF((prev) => ({ ...prev, icon }));
                       } catch {
                         /* ignore */
                       }
