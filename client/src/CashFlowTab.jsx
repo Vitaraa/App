@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  ComposedChart,
-  Bar,
+  LineChart,
   Line,
   XAxis,
   YAxis,
@@ -54,19 +53,19 @@ export default function CashFlowTab({ txns }) {
           <p className="muted empty">No transactions yet.</p>
         ) : (
           <ResponsiveContainer width="100%" height={320}>
-            <ComposedChart data={series} margin={{ top: 12, right: 8, left: -4, bottom: 0 }}>
+            <LineChart data={series} margin={{ top: 12, right: 8, left: -4, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
               <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={20} />
               <YAxis tickLine={false} axisLine={false} width={56} fontSize={12} tickFormatter={fmt0} />
               <Tooltip
-                formatter={(v, n) => [fmt(v), n[0].toUpperCase() + n.slice(1)]}
+                formatter={(v, n) => [fmt(v), n]}
                 contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="income" name="Income" fill="var(--green)" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="expense" name="Expense" fill="var(--red)" radius={[3, 3, 0, 0]} />
-              <Line type="monotone" dataKey="net" name="Net" stroke="var(--accent)" strokeWidth={2.5} dot={false} />
-            </ComposedChart>
+              <Line type="monotone" dataKey="income" name="Income" stroke="var(--green)" strokeWidth={2.5} dot={false} />
+              <Line type="monotone" dataKey="expense" name="Expense" stroke="var(--red)" strokeWidth={2.5} dot={false} />
+              <Line type="monotone" dataKey="net" name="Net" stroke="var(--accent)" strokeWidth={2.5} strokeDasharray="5 4" dot={false} />
+            </LineChart>
           </ResponsiveContainer>
         )}
       </section>

@@ -7,7 +7,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import db from "./db.js";
-import { categorize, merchantToken, normalizeDescription } from "./categorize.js";
+import { categorize, merchantKey, normalizeDescription } from "./categorize.js";
 import { getQuotes, searchSymbols, getHistory } from "./quotes.js";
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -144,10 +144,12 @@ app.patch("/api/transactions/:id", auth, (req, res) => {
       WHERE id = ? AND user_id = ?`
   ).run(next.category, next.note, next.type, next.amount, next.date, needsReview, existing.id, req.user.id);
 
-  // Learn a rule from the correction (only for real categories on rows that
-  // came from a statement and have a merchant description).
+  // Learn a rule from the correction AND re-label every existing transaction
+  // from the same merchant — so categorizing "ALIEXPRESS -> Shopping" once
+  // fixes them all and is remembered for future imports.
+  let alsoUpdated = 0;
   if (categoryChanged && existing.description && next.category !== "Uncategorized") {
-    const pattern = merchantToken(existing.description);
+    const pattern = merchantKey(existing.description);
     if (pattern) {
       db.prepare(
         `INSERT INTO category_rules (user_id, pattern, category, hits, updated_at)
@@ -157,11 +159,30 @@ app.patch("/api/transactions/:id", auth, (req, res) => {
                        hits = category_rules.hits + 1,
                        updated_at = datetime('now')`
       ).run(req.user.id, pattern, next.category);
+
+      // Find every other transaction from the same merchant and update it.
+      const candidates = db
+        .prepare("SELECT id, description, category FROM transactions WHERE user_id = ? AND description <> ''")
+        .all(req.user.id);
+      const upd = db.prepare(
+        "UPDATE transactions SET category = ?, needs_review = 0 WHERE id = ? AND user_id = ?"
+      );
+      const run = db.transaction(() => {
+        for (const c of candidates) {
+          if (c.id === existing.id) continue;
+          if (c.category === next.category) continue;
+          if (merchantKey(c.description) === pattern) {
+            upd.run(next.category, c.id, req.user.id);
+            alsoUpdated++;
+          }
+        }
+      });
+      run();
     }
   }
 
   const row = db.prepare("SELECT * FROM transactions WHERE id = ?").get(existing.id);
-  res.json(row);
+  res.json({ ...row, alsoUpdated });
 });
 
 // Bulk import parsed statement rows. The client parses the CSV/PDF into
@@ -748,6 +769,23 @@ app.delete("/api/sub-ignores/:id", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Settings (per-user preferences) ------------------------------------
+app.get("/api/settings", auth, (req, res) => {
+  const rows = db.prepare("SELECT key, value FROM settings WHERE user_id = ?").all(req.user.id);
+  res.json(Object.fromEntries(rows.map((r) => [r.key, r.value])));
+});
+
+app.post("/api/settings", auth, (req, res) => {
+  const key = String(req.body?.key || "").trim();
+  if (!key) return res.status(400).json({ error: "key is required" });
+  const value = req.body?.value == null ? null : String(req.body.value);
+  db.prepare(
+    `INSERT INTO settings (user_id, key, value) VALUES (?, ?, ?)
+     ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value`
+  ).run(req.user.id, key, value);
+  res.json({ ok: true });
+});
+
 // ---- Budgets (per-category monthly limits) ------------------------------
 app.get("/api/budgets", auth, (req, res) => {
   res.json(
@@ -755,15 +793,12 @@ app.get("/api/budgets", auth, (req, res) => {
   );
 });
 
-// Upsert a category's monthly limit. amount <= 0 removes the budget.
+// Upsert a category's monthly limit (amount 0 = tracked, no limit). Removal of
+// a category from the budget is done via DELETE.
 app.post("/api/budgets", auth, (req, res) => {
   const category = String(req.body?.category || "").trim();
   if (!category) return res.status(400).json({ error: "category is required" });
-  const amount = Number(req.body?.amount) || 0;
-  if (amount <= 0) {
-    db.prepare("DELETE FROM budgets WHERE user_id = ? AND category = ?").run(req.user.id, category);
-    return res.json({ ok: true, removed: true, category });
-  }
+  const amount = Math.max(0, Number(req.body?.amount) || 0);
   db.prepare(
     `INSERT INTO budgets (user_id, category, amount) VALUES (?, ?, ?)
      ON CONFLICT(user_id, category) DO UPDATE SET amount = excluded.amount`
@@ -771,6 +806,15 @@ app.post("/api/budgets", auth, (req, res) => {
   res.status(201).json(
     db.prepare("SELECT * FROM budgets WHERE user_id = ? AND category = ?").get(req.user.id, category)
   );
+});
+
+// Remove a budget category by name.
+app.delete("/api/budgets/by-category/:category", auth, (req, res) => {
+  db.prepare("DELETE FROM budgets WHERE user_id = ? AND category = ?").run(
+    req.user.id,
+    String(req.params.category)
+  );
+  res.json({ ok: true });
 });
 
 app.delete("/api/budgets/:id", auth, (req, res) => {

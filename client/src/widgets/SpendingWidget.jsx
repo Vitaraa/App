@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  BarChart,
-  Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -71,17 +71,23 @@ export default function SpendingWidget({ txns }) {
       ) : (
         <>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={series} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} onClick={pickBar}>
+            <LineChart data={series} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} onClick={pickBar}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={20} />
               <YAxis tickLine={false} axisLine={false} width={52} fontSize={12} tickFormatter={fmt} />
               <Tooltip
-                cursor={{ fill: "rgba(255,255,255,0.04)" }}
                 formatter={(v) => [fmtFull(v), "Spending"]}
                 contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }}
               />
-              <Bar dataKey="value" fill="var(--red)" radius={[4, 4, 0, 0]} cursor="pointer" />
-            </BarChart>
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="var(--red)"
+                strokeWidth={2.5}
+                dot={{ r: 3, cursor: "pointer" }}
+                activeDot={{ r: 5 }}
+              />
+            </LineChart>
           </ResponsiveContainer>
           {!selected && (
             <p className="muted hint-sm">Tip: click a bar to see that period's transactions.</p>

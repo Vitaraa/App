@@ -26,7 +26,20 @@ export default function Dashboard() {
   const [tab, setTab] = useState("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem("claud_theme") || "dark");
+  const [rollover, setRollover] = useState(false);
   const menuRef = useRef(null);
+
+  useEffect(() => {
+    api.getSettings().then((s) => setRollover(s.budget_rollover === "1")).catch(() => {});
+  }, []);
+  async function toggleRollover(on) {
+    setRollover(on);
+    try {
+      await api.setSetting("budget_rollover", on ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }
 
   async function load() {
     try {
@@ -145,6 +158,16 @@ export default function Dashboard() {
                 >
                   Light
                 </button>
+              </div>
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>Budget rollover</strong>
+                <p className="muted">Carry each category's leftover budget into the next month.</p>
+              </div>
+              <div className="seg">
+                <button className={`seg-btn ${rollover ? "seg-on" : ""}`} onClick={() => toggleRollover(true)}>On</button>
+                <button className={`seg-btn ${!rollover ? "seg-on" : ""}`} onClick={() => toggleRollover(false)}>Off</button>
               </div>
             </div>
             <div className="setting-row">

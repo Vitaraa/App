@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.js";
 import { parseStatementFile } from "./statementParser.js";
 import { computeInsights } from "./insights.js";
@@ -28,6 +28,19 @@ export default function Transactions({ txns, reload }) {
   const [aAmount, setAAmount] = useState("");
   const [aCategory, setACategory] = useState("");
   const [aDate, setADate] = useState("");
+  const [budgetCats, setBudgetCats] = useState([]);
+
+  // Category options = base list + any custom budget categories + categories
+  // already present in the data, so custom categories are assignable here.
+  useEffect(() => {
+    api.listBudgets().then((rows) => setBudgetCats(rows.map((r) => r.category))).catch(() => {});
+  }, []);
+  const allCategories = useMemo(() => {
+    const set = new Set(CATEGORIES);
+    for (const c of budgetCats) if (c) set.add(c);
+    for (const t of txns) if (t.category) set.add(t.category);
+    return [...set];
+  }, [budgetCats, txns]);
 
   const insights = useMemo(() => computeInsights(txns), [txns]);
 
@@ -207,7 +220,7 @@ export default function Transactions({ txns, reload }) {
             />
             <select value={aCategory} onChange={(e) => setACategory(e.target.value)}>
               <option value="">Category…</option>
-              {CATEGORIES.map((c) => (
+              {allCategories.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
@@ -305,7 +318,7 @@ export default function Transactions({ txns, reload }) {
                         onChange={(e) => changeCategory(t, e.target.value)}
                         title="Change category"
                       >
-                        {CATEGORIES.map((c) => (
+                        {allCategories.map((c) => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>

@@ -104,6 +104,15 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_holdings_acct ON holdings(account_id);
 
+  -- Per-user key/value preferences (e.g. budget rollover toggle).
+  CREATE TABLE IF NOT EXISTS settings (
+    user_id INTEGER NOT NULL,
+    key     TEXT NOT NULL,
+    value   TEXT,
+    PRIMARY KEY (user_id, key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
   -- Per-category monthly budget limits.
   CREATE TABLE IF NOT EXISTS budgets (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

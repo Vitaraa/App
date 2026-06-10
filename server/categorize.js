@@ -65,6 +65,51 @@ export function merchantToken(desc) {
   return words.join(" ");
 }
 
+// Brand key for grouping transactions by merchant — mirrors the client's
+// shortenMerchant: strips processor prefixes, "*" order tokens, store/ref
+// numbers, trailing "<city> <region>" locations and generic descriptor words,
+// leaving the brand (uppercased). Used for learned rules + bulk re-labeling so
+// all variants of one merchant ("ALIEXPRESS TORONTO ON", "ALIEXPRESS 9988 …")
+// group together.
+const MK_PREFIX = /^(SQ|TST|PY|PP|POS|SP|PAYPAL|VISA|MASTERCARD|AMEX|INTERAC|PURCHASE|PAYMENT|DEBIT|WEB|RECURRING|PRE-?AUTH|POINT OF SALE|RETAIL PURCHASE|DD)\b[\s*:.-]*/;
+const MK_DESCRIPTORS = new Set([
+  "RESTAURANT", "RESTAURANTS", "BISTRO", "CAFE", "COFFEE", "GRILL", "KITCHEN",
+  "BAR", "PUB", "BAKERY", "DELI", "DINER", "EATERY", "STEAKHOUSE", "BUFFET",
+  "SUSHI", "RAMEN", "NOODLE", "NOODLES", "PIZZA", "PIZZERIA", "BBQ", "HOTPOT",
+  "MARKET", "SUPERMARKET", "GROCERY", "GROCERIES", "FOODS", "FOOD", "RETAIL",
+  "STORE", "MART", "PHARMACY", "LIQUOR", "KOREAN", "CHINESE", "JAPANESE",
+  "THAI", "INDIAN", "MEXICAN", "ITALIAN", "VIETNAMESE", "AND", "THE",
+]);
+const MK_REGIONS = new Set([
+  "BC", "AB", "SK", "MB", "ON", "QC", "NB", "NS", "PE", "NL", "YT", "NT", "NU",
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL",
+  "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT",
+  "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI",
+  "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+]);
+
+export function merchantKey(raw) {
+  if (!raw) return "";
+  let s = String(raw).toUpperCase().replace(/\s+/g, " ").trim();
+  s = s.replace(/([A-Z])#/g, "$1 #");
+  s = s.replace(MK_PREFIX, "").trim();
+  s = s.replace(/\*\S*/g, " ").replace(/\s+/g, " ").trim();
+  const numCut = s.replace(/\s+#?\d{3,}.*$/, "").trim();
+  if (numCut) s = numCut;
+  const words = s.split(" ").filter(Boolean);
+  const kept = [];
+  for (const w of words) {
+    const bare = w.replace(/[^A-Z&]/g, "");
+    if (MK_REGIONS.has(bare) && kept.length) { kept.pop(); break; }
+    if (MK_DESCRIPTORS.has(bare) && kept.length) break;
+    kept.push(w);
+    if (kept.length >= 5) break;
+  }
+  let name = (kept.length ? kept : words.slice(0, 5)).join(" ").trim();
+  name = name.replace(/[\s,;:#*.-]+$/, "").trim();
+  return name || s;
+}
+
 // Categorize one description.
 //  - learnedRules: array of { pattern, category } (normalized patterns)
 //  - fallbackType: 'income' | 'expense' — nudges the default for unmatched rows
@@ -79,7 +124,7 @@ export function categorize(description, learnedRules = [], fallbackType = "expen
   }
 
   // 1. Learned rules first (user corrections win).
-  const token = merchantToken(description);
+  const token = merchantKey(description);
   for (const r of learnedRules) {
     if (!r.pattern) continue;
     if (token === r.pattern || norm.includes(r.pattern)) {

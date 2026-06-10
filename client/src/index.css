@@ -1430,9 +1430,23 @@ select:focus {
 }
 .budget-row {
   display: grid;
-  grid-template-columns: 130px 1fr auto 110px;
+  grid-template-columns: 130px 1fr auto 100px 24px;
   align-items: center;
   gap: 12px;
+}
+.budget-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.budget-add select,
+.budget-add input {
+  margin-top: 0;
+  width: auto;
+  flex: 1;
+  min-width: 120px;
 }
 .budget-cat {
   font-weight: 600;

@@ -68,9 +68,15 @@ export const api = {
     request(`/subscriptions/${id}`, { method: "PATCH", body: patch }),
   deleteSubscription: (id) => request(`/subscriptions/${id}`, { method: "DELETE" }),
 
+  // Settings (per-user preferences)
+  getSettings: () => request("/settings"),
+  setSetting: (key, value) => request("/settings", { method: "POST", body: { key, value } }),
+
   // Budgets (per-category monthly limits)
   listBudgets: () => request("/budgets"),
   setBudget: (category, amount) => request("/budgets", { method: "POST", body: { category, amount } }),
+  removeBudgetCategory: (category) =>
+    request(`/budgets/by-category/${encodeURIComponent(category)}`, { method: "DELETE" }),
 
   // Dismissed auto-detected subscriptions
   listSubIgnores: () => request("/sub-ignores"),
