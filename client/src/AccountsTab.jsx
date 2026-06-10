@@ -1,14 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
-import {
-  INSTITUTIONS,
-  ACCOUNT_TYPES,
-  GROUPS,
-  institutionFor,
-  typeLabel,
-  accountGroup,
-  kindForGroup,
-} from "./institutions.js";
+import { ACCOUNT_TYPES, GROUPS, typeLabel, accountGroup, kindForGroup } from "./institutions.js";
+import AccountIcon from "./AccountIcon.jsx";
 import InvestmentHoldings from "./InvestmentHoldings.jsx";
 import { shortenMerchant } from "./merchant.js";
 import PageActions from "./PageActions.jsx";
@@ -91,18 +84,17 @@ function AccountTxModal({ account, onClose }) {
 // present, else the stored balance.
 const acctValue = (a) => (a.value != null ? Number(a.value) : Number(a.balance || 0));
 
-function Badge({ inst, icon }) {
+function Badge({ type, icon }) {
   if (icon) {
     return (
-      <span className="inst-badge inst-img">
+      <span className="acct-badge has-img">
         <img src={icon} alt="" />
       </span>
     );
   }
-  const i = institutionFor(inst);
   return (
-    <span className="inst-badge" style={{ background: i.bg, color: i.fg }} title={i.label}>
-      {i.abbr}
+    <span className="acct-badge">
+      <AccountIcon type={type} />
     </span>
   );
 }
@@ -149,36 +141,23 @@ function AccountModal({ initial, onSubmit, onClose }) {
             <label>Name</label>
             <input value={f.name} onChange={set("name")} autoFocus placeholder="e.g. Everyday Chequing" />
           </div>
-          <div className="field-row">
-            <div className="field">
-              <label>Type</label>
-              <select value={f.type} onChange={set("type")}>
-                {ACCOUNT_TYPES.map((t) => (
-                  <option key={t.key} value={t.key}>{t.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Institution</label>
-              <select value={f.institution} onChange={set("institution")}>
-                {INSTITUTIONS.map((i) => (
-                  <option key={i.key} value={i.key}>{i.label}</option>
-                ))}
-              </select>
-            </div>
+          <div className="field">
+            <label>Type</label>
+            <select value={f.type} onChange={set("type")}>
+              {ACCOUNT_TYPES.map((t) => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
           </div>
 
           <div className="field">
             <label>Icon</label>
             <div className="icon-field">
               {f.icon ? (
-                <span className="inst-badge inst-img icon-preview"><img src={f.icon} alt="" /></span>
+                <span className="acct-badge has-img icon-preview"><img src={f.icon} alt="" /></span>
               ) : (
-                <span
-                  className="inst-badge icon-preview"
-                  style={{ background: institutionFor(f.institution).bg, color: institutionFor(f.institution).fg }}
-                >
-                  {institutionFor(f.institution).abbr}
+                <span className="acct-badge icon-preview">
+                  <AccountIcon type={f.type} />
                 </span>
               )}
               <label className="btn ghost sm icon-upload">
@@ -303,7 +282,7 @@ export default function AccountsTab({ txns = [] }) {
   );
 
   function openAdd() {
-    setModal({ initial: { name: "", type: "chequing", institution: "rbc", balance: "", group: "", last4: "", icon: "" } });
+    setModal({ initial: { name: "", type: "chequing", institution: "other", balance: "", group: "", last4: "", icon: "" } });
   }
   function openEdit(a) {
     setModal({
@@ -337,7 +316,7 @@ export default function AccountsTab({ txns = [] }) {
       return (
         <div key={a.id} className="acct-block">
           <div className="acct-item acct-invest">
-            <Badge inst={a.institution} icon={a.icon} />
+            <Badge type={a.type} icon={a.icon} />
             <div className="acct-info">
               <span className="acct-itemname">{a.name}</span>
               <button className="link sm acct-type" onClick={() => setExpandedId(open ? null : a.id)}>
@@ -364,7 +343,7 @@ export default function AccountsTab({ txns = [] }) {
         onClick={() => setTxAccount(a)}
         title="View transactions"
       >
-        <Badge inst={a.institution} icon={a.icon} />
+        <Badge type={a.type} icon={a.icon} />
         <div className="acct-info">
           <span className="acct-itemname">{a.name}</span>
           <span className="acct-type muted">

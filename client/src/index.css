@@ -952,6 +952,29 @@ select:focus {
   object-fit: contain;
 }
 
+/* Minimal type-based account badge (theme-aware via currentColor) */
+.acct-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--input-bg);
+  color: var(--text);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.acct-badge svg {
+  width: 22px;
+  height: 22px;
+}
+.acct-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 /* Icon upload field (account modal) */
 .icon-field {
   display: flex;
