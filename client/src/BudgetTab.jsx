@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
+import { categoryIcon } from "./institutions.js";
+import { fileToIcon } from "./imageIcon.js";
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -165,7 +167,32 @@ export default function BudgetTab({ txns }) {
               const over = eff > 0 && used > eff;
               return (
                 <li key={b.id} className="budget-row">
-                  <span className="budget-cat">{b.category}</span>
+                  <span className="budget-cat">
+                    <label className="budget-icon" title="Upload a custom icon">
+                      {b.icon ? (
+                        <img src={b.icon} alt="" />
+                      ) : (
+                        <span className="budget-emoji">{categoryIcon(b.category)}</span>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              await api.setBudget(b.category, undefined, await fileToIcon(file));
+                              load();
+                            } catch {
+                              /* ignore */
+                            }
+                          }
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                    {b.category}
+                  </span>
                   <div className="budget-bar">
                     <div
                       className={`budget-fill ${over ? "over" : ""}`}

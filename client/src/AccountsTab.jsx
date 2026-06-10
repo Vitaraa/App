@@ -14,6 +14,7 @@ import { shortenMerchant } from "./merchant.js";
 import PageActions from "./PageActions.jsx";
 import GranularityTabs from "./widgets/GranularityTabs.jsx";
 import { netWorthSeries, accountsNetWorth } from "./timeseries.js";
+import { fileToIcon } from "./imageIcon.js";
 import {
   LineChart,
   Line,
@@ -90,11 +91,18 @@ function AccountTxModal({ account, onClose }) {
 // present, else the stored balance.
 const acctValue = (a) => (a.value != null ? Number(a.value) : Number(a.balance || 0));
 
-function Badge({ institution }) {
-  const inst = institutionFor(institution);
+function Badge({ inst, icon }) {
+  if (icon) {
+    return (
+      <span className="inst-badge inst-img">
+        <img src={icon} alt="" />
+      </span>
+    );
+  }
+  const i = institutionFor(inst);
   return (
-    <span className="inst-badge" style={{ background: inst.bg, color: inst.fg }} title={inst.label}>
-      {inst.abbr}
+    <span className="inst-badge" style={{ background: i.bg, color: i.fg }} title={i.label}>
+      {i.abbr}
     </span>
   );
 }
@@ -133,6 +141,7 @@ function AccountModal({ initial, onSubmit, onClose }) {
               balance: isInvestment ? 0 : Number(f.balance) || 0,
               group: isOther ? f.group : undefined,
               last4: f.last4 || "",
+              icon: f.icon || "",
             });
           }}
         >
@@ -158,6 +167,46 @@ function AccountModal({ initial, onSubmit, onClose }) {
               </select>
             </div>
           </div>
+
+          <div className="field">
+            <label>Icon</label>
+            <div className="icon-field">
+              {f.icon ? (
+                <span className="inst-badge inst-img icon-preview"><img src={f.icon} alt="" /></span>
+              ) : (
+                <span
+                  className="inst-badge icon-preview"
+                  style={{ background: institutionFor(f.institution).bg, color: institutionFor(f.institution).fg }}
+                >
+                  {institutionFor(f.institution).abbr}
+                </span>
+              )}
+              <label className="btn ghost sm icon-upload">
+                Upload
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      try {
+                        setF((prev) => ({ ...prev, icon: await fileToIcon(file) }));
+                      } catch {
+                        /* ignore */
+                      }
+                    }
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {f.icon && (
+                <button type="button" className="link sm" onClick={() => setF((prev) => ({ ...prev, icon: "" }))}>
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+
           {isOther && (
             <div className="field">
               <label>Which group does it belong to?</label>
@@ -253,13 +302,13 @@ export default function AccountsTab({ txns = [] }) {
   );
 
   function openAdd() {
-    setModal({ initial: { name: "", type: "chequing", institution: "rbc", balance: "", group: "", last4: "" } });
+    setModal({ initial: { name: "", type: "chequing", institution: "rbc", balance: "", group: "", last4: "", icon: "" } });
   }
   function openEdit(a) {
     setModal({
       initial: {
         id: a.id, name: a.name, type: a.type, institution: a.institution,
-        balance: a.balance, group: accountGroup(a), last4: a.last4 || "",
+        balance: a.balance, group: accountGroup(a), last4: a.last4 || "", icon: a.icon || "",
       },
     });
   }
@@ -287,7 +336,7 @@ export default function AccountsTab({ txns = [] }) {
       return (
         <div key={a.id} className="acct-block">
           <div className="acct-item acct-invest">
-            <Badge institution={a.institution} />
+            <Badge inst={a.institution} icon={a.icon} />
             <div className="acct-info">
               <span className="acct-itemname">{a.name}</span>
               <button className="link sm acct-type" onClick={() => setExpandedId(open ? null : a.id)}>
@@ -314,7 +363,7 @@ export default function AccountsTab({ txns = [] }) {
         onClick={() => setTxAccount(a)}
         title="View transactions"
       >
-        <Badge institution={a.institution} />
+        <Badge inst={a.institution} icon={a.icon} />
         <div className="acct-info">
           <span className="acct-itemname">{a.name}</span>
           <span className="acct-type muted">

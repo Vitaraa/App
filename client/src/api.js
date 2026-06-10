@@ -74,7 +74,8 @@ export const api = {
 
   // Budgets (per-category monthly limits)
   listBudgets: () => request("/budgets"),
-  setBudget: (category, amount) => request("/budgets", { method: "POST", body: { category, amount } }),
+  setBudget: (category, amount, icon) =>
+    request("/budgets", { method: "POST", body: { category, amount, icon } }),
   removeBudgetCategory: (category) =>
     request(`/budgets/by-category/${encodeURIComponent(category)}`, { method: "DELETE" }),
 

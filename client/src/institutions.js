@@ -52,6 +52,17 @@ const TYPE_GROUP = {
   student_loan: "loans", loan: "loans", other_liability: "loans",
 };
 
+// Default budget-category icons (overridable by a custom uploaded image).
+export const CATEGORY_ICONS = {
+  Groceries: "🛒", Dining: "🍽️", Transport: "🚗", Subscriptions: "🔁",
+  Shopping: "🛍️", Utilities: "💡", Housing: "🏠", Health: "🏥",
+  Insurance: "🛡️", Entertainment: "🎬", Education: "🎓", Transfers: "🔄",
+  Fees: "💳", Income: "💰", Other: "📦", Uncategorized: "❓",
+};
+export function categoryIcon(cat) {
+  return CATEGORY_ICONS[cat] || "📦";
+}
+
 export function institutionFor(key) {
   return INSTITUTIONS.find((i) => i.key === key) || INSTITUTIONS[INSTITUTIONS.length - 1];
 }

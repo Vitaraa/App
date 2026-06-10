@@ -171,5 +171,14 @@ if (!acctCols.includes("last4")) {
   // statement transactions to this account.
   addColumn("ALTER TABLE accounts ADD COLUMN last4 TEXT NOT NULL DEFAULT ''");
 }
+if (!acctCols.includes("icon")) {
+  // Optional custom icon (small data-URL image) overriding the institution badge.
+  addColumn("ALTER TABLE accounts ADD COLUMN icon TEXT NOT NULL DEFAULT ''");
+}
+
+const budgetCols = db.prepare("PRAGMA table_info(budgets)").all().map((c) => c.name);
+if (!budgetCols.includes("icon")) {
+  addColumn("ALTER TABLE budgets ADD COLUMN icon TEXT NOT NULL DEFAULT ''");
+}
 
 export default db;

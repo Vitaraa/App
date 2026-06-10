@@ -629,7 +629,7 @@ app.get("/api/quotes", auth, async (req, res) => {
 const clean4 = (v) => String(v || "").replace(/\D/g, "").slice(-4);
 
 app.post("/api/accounts", auth, (req, res) => {
-  const { name, balance, type, institution, group, last4 } = req.body || {};
+  const { name, balance, type, institution, group, last4, icon } = req.body || {};
   if (!name || !String(name).trim())
     return res.status(400).json({ error: "name is required" });
   const t = type && (TYPE_GROUP[type] || type === "other") ? type : "other";
@@ -637,9 +637,9 @@ app.post("/api/accounts", auth, (req, res) => {
   const k = GROUP_KIND[grp] || "asset";
   const info = db
     .prepare(
-      "INSERT INTO accounts (user_id, name, kind, balance, type, institution, account_group, last4) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO accounts (user_id, name, kind, balance, type, institution, account_group, last4, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
-    .run(req.user.id, String(name).trim(), k, Number(balance) || 0, t, String(institution || "other"), grp, clean4(last4));
+    .run(req.user.id, String(name).trim(), k, Number(balance) || 0, t, String(institution || "other"), grp, clean4(last4), String(icon || ""));
   res.status(201).json(db.prepare("SELECT * FROM accounts WHERE id = ?").get(info.lastInsertRowid));
 });
 
@@ -648,12 +648,12 @@ app.patch("/api/accounts/:id", auth, (req, res) => {
     .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")
     .get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: "Not found" });
-  const { name, balance, type, institution, group, last4 } = req.body || {};
+  const { name, balance, type, institution, group, last4, icon } = req.body || {};
   const nextType = type && (TYPE_GROUP[type] || type === "other") ? type : row.type;
   const nextGroup = resolveGroup(nextType, group != null ? group : row.account_group);
   const nextKind = GROUP_KIND[nextGroup] || row.kind;
   db.prepare(
-    "UPDATE accounts SET name = ?, kind = ?, balance = ?, type = ?, institution = ?, account_group = ?, last4 = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
+    "UPDATE accounts SET name = ?, kind = ?, balance = ?, type = ?, institution = ?, account_group = ?, last4 = ?, icon = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
   ).run(
     name != null ? String(name).trim() : row.name,
     nextKind,
@@ -662,6 +662,7 @@ app.patch("/api/accounts/:id", auth, (req, res) => {
     institution != null ? String(institution) : row.institution,
     nextGroup,
     last4 != null ? clean4(last4) : row.last4,
+    icon != null ? String(icon) : row.icon,
     row.id,
     req.user.id
   );
@@ -832,11 +833,18 @@ app.get("/api/budgets", auth, (req, res) => {
 app.post("/api/budgets", auth, (req, res) => {
   const category = String(req.body?.category || "").trim();
   if (!category) return res.status(400).json({ error: "category is required" });
-  const amount = Math.max(0, Number(req.body?.amount) || 0);
+  const existing = db
+    .prepare("SELECT * FROM budgets WHERE user_id = ? AND category = ?")
+    .get(req.user.id, category);
+  // amount and icon are independently optional so a limit edit doesn't wipe the
+  // icon and vice versa.
+  const amount =
+    req.body?.amount != null ? Math.max(0, Number(req.body.amount) || 0) : existing ? existing.amount : 0;
+  const icon = req.body?.icon != null ? String(req.body.icon) : existing ? existing.icon : "";
   db.prepare(
-    `INSERT INTO budgets (user_id, category, amount) VALUES (?, ?, ?)
-     ON CONFLICT(user_id, category) DO UPDATE SET amount = excluded.amount`
-  ).run(req.user.id, category, amount);
+    `INSERT INTO budgets (user_id, category, amount, icon) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, category) DO UPDATE SET amount = excluded.amount, icon = excluded.icon`
+  ).run(req.user.id, category, amount, icon);
   res.status(201).json(
     db.prepare("SELECT * FROM budgets WHERE user_id = ? AND category = ?").get(req.user.id, category)
   );
