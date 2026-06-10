@@ -284,6 +284,42 @@ app.get("/api/accounts", auth, async (req, res) => {
 });
 
 // ---- Holdings (stocks inside an investment account) ---------------------
+// Price a list of holding rows with live quotes -> adds price/marketValue/etc.
+function priceHoldings(holds, quotes) {
+  return holds.map((h) => {
+    const price = quotes[String(h.ticker).toUpperCase()] ?? null;
+    const marketValue = round2((price ?? h.purchase_price) * h.quantity);
+    const costBasis = round2(h.purchase_price * h.quantity);
+    return {
+      ...h,
+      price,
+      marketValue,
+      costBasis,
+      gain: round2(marketValue - costBasis),
+      gainPct: costBasis > 0 ? round2(((marketValue - costBasis) / costBasis) * 100) : 0,
+    };
+  });
+}
+
+// All of the user's holdings across every investment account (for the
+// dashboard investments widget).
+app.get("/api/holdings", auth, async (req, res) => {
+  const holds = db
+    .prepare(
+      `SELECT h.*, a.name AS account_name
+         FROM holdings h JOIN accounts a ON a.id = h.account_id
+        WHERE h.user_id = ? ORDER BY h.id`
+    )
+    .all(req.user.id);
+  let quotes = {};
+  try {
+    quotes = await getQuotes(holds.map((h) => h.ticker));
+  } catch {
+    quotes = {};
+  }
+  res.json(priceHoldings(holds, quotes));
+});
+
 app.get("/api/accounts/:id/holdings", auth, async (req, res) => {
   const acct = db
     .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")

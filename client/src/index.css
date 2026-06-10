@@ -303,6 +303,24 @@ select:focus {
   border-radius: 9px;
   padding: 8px 12px;
 }
+.manual-add {
+  display: grid;
+  grid-template-columns: 120px 1fr 1fr 150px auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.manual-add input,
+.manual-add select {
+  margin-top: 0;
+}
+@media (max-width: 560px) {
+  .manual-add {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 
 /* Toolbar + filter chips */
 .tx-toolbar {
@@ -965,6 +983,14 @@ select:focus {
 }
 .hd-sub {
   font-size: 0.72rem;
+}
+.invest-gain {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  font-weight: 600;
+  font-size: 0.95rem;
 }
 .holdings {
   display: flex;

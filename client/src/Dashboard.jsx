@@ -5,7 +5,7 @@ import Transactions from "./Transactions.jsx";
 import AccountsTab from "./AccountsTab.jsx";
 import NetWorthWidget from "./widgets/NetWorthWidget.jsx";
 import SpendingWidget from "./widgets/SpendingWidget.jsx";
-import RecentWidget from "./widgets/RecentWidget.jsx";
+import InvestmentsWidget from "./widgets/InvestmentsWidget.jsx";
 import GoalsWidget from "./widgets/GoalsWidget.jsx";
 import SubscriptionsWidget from "./widgets/SubscriptionsWidget.jsx";
 
@@ -75,7 +75,7 @@ export default function Dashboard() {
             <SpendingWidget txns={txns} />
           </div>
           <div className="dash-grid dash-medium">
-            <RecentWidget txns={txns} reload={load} />
+            <InvestmentsWidget />
             <GoalsWidget />
             <SubscriptionsWidget txns={txns} />
           </div>

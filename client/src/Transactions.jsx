@@ -22,8 +22,34 @@ export default function Transactions({ txns, reload }) {
   const [filter, setFilter] = useState("all"); // all | review
   // Sort by a column key with a direction. Click a header to sort / toggle.
   const [sort, setSort] = useState({ key: "date", dir: "desc" });
+  // Manual add-transaction form.
+  const [addOpen, setAddOpen] = useState(false);
+  const [aType, setAType] = useState("expense");
+  const [aAmount, setAAmount] = useState("");
+  const [aCategory, setACategory] = useState("");
+  const [aDate, setADate] = useState("");
 
   const insights = useMemo(() => computeInsights(txns), [txns]);
+
+  async function addManual(e) {
+    e.preventDefault();
+    setError("");
+    try {
+      await api.addTransaction({
+        type: aType,
+        amount: Number(aAmount),
+        category: aCategory.trim() || (aType === "income" ? "Income" : "Other"),
+        date: aDate || undefined,
+      });
+      setAAmount("");
+      setACategory("");
+      setADate("");
+      setAddOpen(false);
+      reload();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
 
   // Click a column header: toggle direction if it's already active, otherwise
   // switch to it with a sensible default (newest/highest first for date/amount,
@@ -155,8 +181,36 @@ export default function Transactions({ txns, reload }) {
             >
               {busy ? "Importing…" : "Choose file"}
             </button>
+            <button className="btn ghost" onClick={() => setAddOpen((v) => !v)}>
+              {addOpen ? "Cancel" : "+ Add manually"}
+            </button>
           </div>
         </div>
+        {addOpen && (
+          <form className="manual-add" onSubmit={addManual}>
+            <select value={aType} onChange={(e) => setAType(e.target.value)}>
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+            </select>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="Amount"
+              value={aAmount}
+              onChange={(e) => setAAmount(e.target.value)}
+              required
+            />
+            <select value={aCategory} onChange={(e) => setACategory(e.target.value)}>
+              <option value="">Category…</option>
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <input type="date" value={aDate} onChange={(e) => setADate(e.target.value)} />
+            <button className="btn primary" type="submit">Add</button>
+          </form>
+        )}
         {importMsg && <div className="import-msg">{importMsg}</div>}
       </section>
 
