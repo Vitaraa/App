@@ -68,6 +68,12 @@ export const api = {
     request(`/subscriptions/${id}`, { method: "PATCH", body: patch }),
   deleteSubscription: (id) => request(`/subscriptions/${id}`, { method: "DELETE" }),
 
+  // Long-term plans (Foresight)
+  listPlans: () => request("/plans"),
+  addPlan: (p) => request("/plans", { method: "POST", body: p }),
+  updatePlan: (id, patch) => request(`/plans/${id}`, { method: "PATCH", body: patch }),
+  deletePlan: (id) => request(`/plans/${id}`, { method: "DELETE" }),
+
   // Settings (per-user preferences)
   getSettings: () => request("/settings"),
   setSetting: (key, value) => request("/settings", { method: "POST", body: { key, value } }),

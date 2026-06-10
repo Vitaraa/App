@@ -804,6 +804,62 @@ app.delete("/api/sub-ignores/:id", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Plans (long-term goals for Foresight) ------------------------------
+app.get("/api/plans", auth, (req, res) => {
+  res.json(db.prepare("SELECT * FROM plans WHERE user_id = ? ORDER BY id").all(req.user.id));
+});
+
+app.post("/api/plans", auth, (req, res) => {
+  const { name, kind, target_amount, target_year, return_rate, start_amount, monthly_contribution } =
+    req.body || {};
+  if (!name || !String(name).trim())
+    return res.status(400).json({ error: "name is required" });
+  const info = db
+    .prepare(
+      `INSERT INTO plans (user_id, name, kind, target_amount, target_year, return_rate, start_amount, monthly_contribution)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      req.user.id,
+      String(name).trim(),
+      ["retirement", "house", "custom"].includes(kind) ? kind : "custom",
+      Number(target_amount) || 0,
+      target_year != null ? Math.round(Number(target_year)) : null,
+      Number(return_rate) || 7,
+      start_amount != null && start_amount !== "" ? Number(start_amount) : null,
+      monthly_contribution != null && monthly_contribution !== "" ? Number(monthly_contribution) : null
+    );
+  res.status(201).json(db.prepare("SELECT * FROM plans WHERE id = ?").get(info.lastInsertRowid));
+});
+
+app.patch("/api/plans/:id", auth, (req, res) => {
+  const row = db.prepare("SELECT * FROM plans WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
+  if (!row) return res.status(404).json({ error: "Not found" });
+  const b = req.body || {};
+  const numOrNull = (v, cur) => (v === "" || v === null ? null : v != null ? Number(v) : cur);
+  db.prepare(
+    `UPDATE plans SET name = ?, kind = ?, target_amount = ?, target_year = ?, return_rate = ?,
+       start_amount = ?, monthly_contribution = ? WHERE id = ? AND user_id = ?`
+  ).run(
+    b.name != null ? String(b.name).trim() : row.name,
+    ["retirement", "house", "custom"].includes(b.kind) ? b.kind : row.kind,
+    b.target_amount != null ? Number(b.target_amount) || 0 : row.target_amount,
+    b.target_year != null ? (b.target_year === "" ? null : Math.round(Number(b.target_year))) : row.target_year,
+    b.return_rate != null ? Number(b.return_rate) || 0 : row.return_rate,
+    numOrNull(b.start_amount, row.start_amount),
+    numOrNull(b.monthly_contribution, row.monthly_contribution),
+    row.id,
+    req.user.id
+  );
+  res.json(db.prepare("SELECT * FROM plans WHERE id = ?").get(row.id));
+});
+
+app.delete("/api/plans/:id", auth, (req, res) => {
+  const info = db.prepare("DELETE FROM plans WHERE id = ? AND user_id = ?").run(req.params.id, req.user.id);
+  if (info.changes === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ ok: true });
+});
+
 // ---- Settings (per-user preferences) ------------------------------------
 app.get("/api/settings", auth, (req, res) => {
   const rows = db.prepare("SELECT key, value FROM settings WHERE user_id = ?").all(req.user.id);

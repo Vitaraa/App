@@ -113,6 +113,21 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  -- Long-term financial plans (retirement, house purchase, etc.) for Foresight.
+  CREATE TABLE IF NOT EXISTS plans (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id              INTEGER NOT NULL,
+    name                 TEXT NOT NULL,
+    kind                 TEXT NOT NULL DEFAULT 'custom',
+    target_amount        REAL NOT NULL DEFAULT 0,
+    target_year          INTEGER,
+    return_rate          REAL NOT NULL DEFAULT 7,
+    start_amount         REAL,           -- null = use current net worth
+    monthly_contribution REAL,           -- null = use estimated surplus
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
   -- Per-category monthly budget limits.
   CREATE TABLE IF NOT EXISTS budgets (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

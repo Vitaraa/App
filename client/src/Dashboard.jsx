@@ -8,6 +8,7 @@ import Transactions from "./Transactions.jsx";
 import CashFlowTab from "./CashFlowTab.jsx";
 import BudgetTab from "./BudgetTab.jsx";
 import InvestmentsTab from "./InvestmentsTab.jsx";
+import ForesightTab from "./ForesightTab.jsx";
 
 const TABS = [
   ["dashboard", "Dashboard"],
@@ -16,6 +17,7 @@ const TABS = [
   ["cashflow", "Cash Flow"],
   ["budget", "Budget"],
   ["investments", "Investments"],
+  ["foresight", "Foresight"],
 ];
 
 export default function Dashboard() {
@@ -139,6 +141,7 @@ export default function Dashboard() {
         {tab === "cashflow" && <CashFlowTab txns={txns} />}
         {tab === "budget" && <BudgetTab txns={txns} />}
         {tab === "investments" && <InvestmentsTab />}
+        {tab === "foresight" && <ForesightTab txns={txns} />}
         {tab === "settings" && (
           <section className="card settings-card">
             <div className="setting-row">
