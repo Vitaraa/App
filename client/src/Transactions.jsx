@@ -76,6 +76,8 @@ export default function Transactions({ txns, reload }) {
           undefined,
           { sensitivity: "base" }
         ),
+      account: (a, b) =>
+        text(a.account_name).localeCompare(text(b.account_name), undefined, { sensitivity: "base" }),
     };
     const cmp = comparators[sort.key] || comparators.date;
     const mul = sort.dir === "asc" ? 1 : -1;
@@ -252,6 +254,7 @@ export default function Transactions({ txns, reload }) {
                   ["date", "Date", ""],
                   ["description", "Description", ""],
                   ["category", "Category", ""],
+                  ["account", "Account", ""],
                   ["amount", "Amount", "right"],
                 ].map(([key, label, align]) => (
                   <th key={key} className={align}>
@@ -307,6 +310,9 @@ export default function Transactions({ txns, reload }) {
                         ))}
                       </select>
                     </div>
+                  </td>
+                  <td className="acct-col muted" title={t.account_name || ""}>
+                    {t.account_name || "—"}
                   </td>
                   <td className={`right nowrap ${t.type === "income" ? "pos" : "neg"}`}>
                     {t.type === "income" ? "+" : "-"}{fmt(t.amount)}

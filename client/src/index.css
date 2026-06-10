@@ -966,6 +966,18 @@ select:focus {
 .acct-tx-list {
   max-height: 60vh;
 }
+/* match the Transactions tab order: date, name, category, amount */
+.acct-tx-list li {
+  grid-template-columns: auto 1fr auto auto;
+}
+/* Account column in the Transactions table */
+.tx-table .acct-col {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
 .link.sm {
   font-size: 0.8rem;
 }

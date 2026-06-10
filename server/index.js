@@ -76,7 +76,11 @@ app.post("/api/auth/login", (req, res) => {
 // ---- Transaction routes -------------------------------------------------
 app.get("/api/transactions", auth, (req, res) => {
   const rows = db
-    .prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, id DESC")
+    .prepare(
+      `SELECT t.*, a.name AS account_name
+         FROM transactions t LEFT JOIN accounts a ON a.id = t.account_id
+        WHERE t.user_id = ? ORDER BY t.date DESC, t.id DESC`
+    )
     .all(req.user.id);
   res.json(rows);
 });

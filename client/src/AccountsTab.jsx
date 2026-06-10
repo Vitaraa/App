@@ -54,11 +54,11 @@ function AccountTxModal({ account, onClose }) {
           <ul className="drill-list acct-tx-list">
             {txns.map((t) => (
               <li key={t.id}>
+                <span className="muted drill-date">{t.date}</span>
                 <span className="drill-name" title={t.description || t.category}>
                   {t.description ? shortenMerchant(t.description) : t.category}
                 </span>
                 <span className="muted drill-cat">{t.category}</span>
-                <span className="muted drill-date">{t.date}</span>
                 <span className={t.type === "income" ? "pos" : "neg"}>
                   {t.type === "income" ? "+" : "-"}{fmt(t.amount)}
                 </span>
