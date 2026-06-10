@@ -7,6 +7,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  Legend,
 } from "recharts";
 import { api } from "../api.js";
 
@@ -74,26 +75,28 @@ export default function InvestmentsWidget() {
             <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={20} />
             <YAxis tickLine={false} axisLine={false} width={48} fontSize={12} tickFormatter={fmt0} />
             <Tooltip
-              formatter={(v, n) => [fmt(v), n === "cost" ? "Invested" : "Value"]}
+              formatter={(v, n) => [v == null ? "—" : fmt(v), n]}
               labelFormatter={(l) => l}
               contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }}
             />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
             <Line
               type="monotone"
-              dataKey="cost"
-              name="cost"
-              stroke="var(--muted)"
-              strokeWidth={1.5}
-              strokeDasharray="4 4"
+              dataKey="value"
+              name="Portfolio"
+              stroke={totalGain >= 0 ? "var(--green)" : "var(--red)"}
+              strokeWidth={2.5}
               dot={false}
             />
             <Line
               type="monotone"
-              dataKey="value"
-              name="value"
-              stroke={totalGain >= 0 ? "var(--green)" : "var(--red)"}
-              strokeWidth={2.5}
+              dataKey="spx"
+              name="S&P 500"
+              stroke="var(--muted)"
+              strokeWidth={1.5}
+              strokeDasharray="5 4"
               dot={false}
+              connectNulls
             />
           </LineChart>
         </ResponsiveContainer>

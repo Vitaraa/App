@@ -1394,11 +1394,121 @@ select:focus {
   flex-direction: column;
   gap: 16px;
 }
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .page-head h1 {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Customize-widgets menu */
+.customize {
+  position: relative;
+}
+.customize-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 30;
+  min-width: 190px;
+}
+.customize-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 8px 6px;
+}
+.customize-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.customize-item:hover {
+  background: var(--hover);
+}
+.customize-item input {
+  width: auto;
+  margin: 0;
+}
+
+/* Accounts: net worth chart + two-column accounts/summary */
+.nw-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.acct-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
+  align-items: start;
+}
+.acct-left {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.acct-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 16px;
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+.summary-row.total {
+  margin-top: 8px;
+  font-weight: 600;
+}
+.summary-row.sub {
+  font-size: 0.82rem;
+  padding-left: 8px;
+}
+.summary-row.net {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+@media (max-width: 860px) {
+  .acct-layout {
+    grid-template-columns: 1fr;
+  }
+  .acct-summary {
+    position: static;
+  }
 }
 
 .settings-card {

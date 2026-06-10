@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api.js";
 import { parseStatementFile } from "./statementParser.js";
-import { computeInsights } from "./insights.js";
 import { shortenMerchant } from "./merchant.js";
 
 const fmt = (n) =>
@@ -41,8 +40,6 @@ export default function Transactions({ txns, reload }) {
     for (const t of txns) if (t.category) set.add(t.category);
     return [...set];
   }, [budgetCats, txns]);
-
-  const insights = useMemo(() => computeInsights(txns), [txns]);
 
   async function addManual(e) {
     e.preventDefault();
@@ -154,23 +151,6 @@ export default function Transactions({ txns, reload }) {
   return (
     <div className="tx-tab">
       {error && <div className="error">{error}</div>}
-
-      {/* Insights summary box */}
-      <section className="card insight-box">
-        <div className="insight-head">
-          <span className="muted">Insights</span>
-        </div>
-        <ul className="insight-list">
-          {insights.map((ins, i) => (
-            <li key={i} className={`insight insight-${ins.severity}`}>
-              <span className="insight-dot" aria-hidden>
-                {ins.severity === "warn" ? "⚠" : ins.severity === "good" ? "↓" : "•"}
-              </span>
-              <span>{ins.text}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
 
       {/* Import */}
       <section className="card import-card">

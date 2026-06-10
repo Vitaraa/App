@@ -566,6 +566,40 @@ app.get("/api/investments/history", auth, async (req, res) => {
     }
     return { date, value: round2(value), cost: round2(cost) };
   });
+
+  // S&P 500 benchmark, scaled so it starts equal to the portfolio's value at its
+  // first funded sample — so the two lines show relative performance.
+  function closeOf(pts, date) {
+    let lo = 0;
+    let hi = pts.length - 1;
+    let ans = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (pts[mid].date <= date) { ans = pts[mid].close; lo = mid + 1; } else hi = mid - 1;
+    }
+    return ans;
+  }
+  let spxHist = [];
+  let spxNow = null;
+  try {
+    spxHist = await getHistory("^GSPC", startSec);
+    const q = await getQuotes(["^GSPC"]);
+    spxNow = q["^GSPC"] ?? null;
+  } catch {
+    spxHist = [];
+  }
+  const baseIdx = series.findIndex((p) => p.value > 0);
+  if (spxHist.length && baseIdx >= 0) {
+    const baseValue = series[baseIdx].value;
+    const baseClose = closeOf(spxHist, series[baseIdx].date);
+    if (baseClose) {
+      series.forEach((p, i) => {
+        if (i < baseIdx) { p.spx = null; return; }
+        const c = p.date === today && spxNow != null ? spxNow : closeOf(spxHist, p.date);
+        p.spx = c ? round2(baseValue * (c / baseClose)) : null;
+      });
+    }
+  }
   res.json(series);
 });
 

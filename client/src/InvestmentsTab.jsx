@@ -7,12 +7,15 @@ const fmt = (n) =>
 
 export default function InvestmentsTab() {
   const [holdings, setHoldings] = useState([]);
+  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
   async function load() {
     setLoading(true);
     try {
-      setHoldings(await api.listAllHoldings());
+      const [h, hist] = await Promise.all([api.listAllHoldings(), api.investmentHistory()]);
+      setHoldings(h);
+      setHistory(hist);
     } catch {
       /* ignore */
     } finally {
@@ -33,12 +36,29 @@ export default function InvestmentsTab() {
     return { value, cost, gain: value - cost, pct: cost > 0 ? ((value - cost) / cost) * 100 : 0 };
   }, [holdings]);
 
+  // S&P 500 return over the same window, and how the portfolio compares.
+  const vsSP = useMemo(() => {
+    const spx = history.map((p) => p.spx).filter((v) => v != null);
+    if (spx.length < 2) return null;
+    const spReturn = ((spx[spx.length - 1] - spx[0]) / spx[0]) * 100;
+    return { spReturn, diff: totals.pct - spReturn };
+  }, [history, totals.pct]);
+
   return (
     <div className="investments-tab">
+      <InvestmentsWidget />
+
       <section className="stats">
         <div className="card stat">
-          <span className="muted">Portfolio value</span>
-          <strong>{fmt(totals.value)}</strong>
+          <span className="muted">vs S&amp;P 500</span>
+          {vsSP ? (
+            <strong className={vsSP.diff >= 0 ? "pos" : "neg"}>
+              {vsSP.diff >= 0 ? "+" : ""}{vsSP.diff.toFixed(1)}%
+              <span className="muted unit"> (S&amp;P {vsSP.spReturn >= 0 ? "+" : ""}{vsSP.spReturn.toFixed(1)}%)</span>
+            </strong>
+          ) : (
+            <strong className="muted">—</strong>
+          )}
         </div>
         <div className="card stat">
           <span className="muted">Invested</span>
@@ -51,8 +71,6 @@ export default function InvestmentsTab() {
           </strong>
         </div>
       </section>
-
-      <InvestmentsWidget />
 
       <section className="card">
         <div className="widget-head">

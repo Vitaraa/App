@@ -29,21 +29,6 @@ export default function CashFlowTab({ txns }) {
 
   return (
     <div className="cashflow-tab">
-      <section className="stats">
-        <div className="card stat">
-          <span className="muted">Money in</span>
-          <strong className="pos">{fmt(totals.income)}</strong>
-        </div>
-        <div className="card stat">
-          <span className="muted">Money out</span>
-          <strong className="neg">{fmt(totals.expense)}</strong>
-        </div>
-        <div className="card stat">
-          <span className="muted">Net cash flow</span>
-          <strong className={totals.net >= 0 ? "pos" : "neg"}>{fmt(totals.net)}</strong>
-        </div>
-      </section>
-
       <section className="card chart-card">
         <div className="widget-head">
           <span className="muted">Income vs expense</span>
@@ -68,6 +53,21 @@ export default function CashFlowTab({ txns }) {
             </LineChart>
           </ResponsiveContainer>
         )}
+      </section>
+
+      <section className="stats">
+        <div className="card stat">
+          <span className="muted">Money in</span>
+          <strong className="pos">{fmt(totals.income)}</strong>
+        </div>
+        <div className="card stat">
+          <span className="muted">Money out</span>
+          <strong className="neg">{fmt(totals.expense)}</strong>
+        </div>
+        <div className="card stat">
+          <span className="muted">Net cash flow</span>
+          <strong className={totals.net >= 0 ? "pos" : "neg"}>{fmt(totals.net)}</strong>
+        </div>
       </section>
     </div>
   );

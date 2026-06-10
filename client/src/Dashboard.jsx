@@ -128,12 +128,13 @@ export default function Dashboard() {
       <main className="main">
         <header className="page-head">
           <h1>{title}</h1>
+          <div id="page-actions" className="page-actions" />
         </header>
 
         {error && <div className="error">{error}</div>}
 
         {tab === "dashboard" && <Home txns={txns} reload={load} />}
-        {tab === "accounts" && <AccountsTab />}
+        {tab === "accounts" && <AccountsTab txns={txns} />}
         {tab === "transactions" && <Transactions txns={txns} reload={load} />}
         {tab === "cashflow" && <CashFlowTab txns={txns} />}
         {tab === "budget" && <BudgetTab txns={txns} />}

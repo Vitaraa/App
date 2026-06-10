@@ -11,6 +11,21 @@ import {
 } from "./institutions.js";
 import InvestmentHoldings from "./InvestmentHoldings.jsx";
 import { shortenMerchant } from "./merchant.js";
+import PageActions from "./PageActions.jsx";
+import GranularityTabs from "./widgets/GranularityTabs.jsx";
+import { netWorthSeries, accountsNetWorth } from "./timeseries.js";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
+
+const fmt0 = (n) =>
+  Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -188,12 +203,13 @@ function AccountModal({ initial, onSubmit, onClose }) {
   );
 }
 
-export default function AccountsTab() {
+export default function AccountsTab({ txns = [] }) {
   const [accounts, setAccounts] = useState([]);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null); // null | { initial }
   const [expandedId, setExpandedId] = useState(null);
   const [txAccount, setTxAccount] = useState(null); // account whose txns window is open
+  const [gran, setGran] = useState("month");
 
   async function load() {
     try {
@@ -213,6 +229,27 @@ export default function AccountsTab() {
         return s + (kindForGroup(accountGroup(a)) === "liability" ? -v : v);
       }, 0),
     [accounts]
+  );
+
+  // Assets vs debt totals + per-group subtotals for the summary panel.
+  const summary = useMemo(() => {
+    const byGroup = {};
+    let assets = 0;
+    let debt = 0;
+    for (const a of accounts) {
+      const g = accountGroup(a);
+      const v = acctValue(a);
+      byGroup[g] = (byGroup[g] || 0) + v;
+      if (kindForGroup(g) === "liability") debt += v;
+      else assets += v;
+    }
+    return { assets, debt, byGroup };
+  }, [accounts]);
+
+  // Net worth over time (cumulative from transactions, anchored to current accounts).
+  const nwSeries = useMemo(
+    () => netWorthSeries(txns || [], gran, accountsNetWorth(accounts)),
+    [txns, gran, accounts]
   );
 
   function openAdd() {
@@ -309,18 +346,69 @@ export default function AccountsTab() {
 
   return (
     <div className="accounts-tab">
+      <PageActions>
+        <button className="btn primary sm" onClick={openAdd}>+ Add account</button>
+      </PageActions>
+
       {error && <div className="error">{error}</div>}
 
-      <section className="card networth-card">
-        <span className="muted">Net worth</span>
-        <strong className={netWorth >= 0 ? "pos" : "neg"}>{fmt(netWorth)}</strong>
+      <section className="card chart-card nw-chart">
+        <div className="widget-head">
+          <div>
+            <span className="muted">Net worth</span>
+            <div className={`widget-value ${netWorth >= 0 ? "pos" : "neg"}`}>{fmt(netWorth)}</div>
+          </div>
+          <GranularityTabs value={gran} onChange={setGran} />
+        </div>
+        {nwSeries.length === 0 ? (
+          <p className="muted empty">Add transactions to see net worth over time.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={nwSeries} margin={{ top: 12, right: 8, left: -8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={20} />
+              <YAxis tickLine={false} axisLine={false} width={52} fontSize={12} tickFormatter={fmt0} />
+              <Tooltip
+                formatter={(v) => [fmt(v), "Net worth"]}
+                contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }}
+              />
+              <Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2.5} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </section>
 
-      <div className="acct-addbar">
-        <button className="btn primary" onClick={openAdd}>+ Add account</button>
-      </div>
+      <div className="acct-layout">
+        <div className="acct-left">{GROUPS.map(renderGroup)}</div>
 
-      <div className="acct-groups">{GROUPS.map(renderGroup)}</div>
+        <aside className="acct-summary card">
+          <span className="muted">Summary</span>
+          <div className="summary-row total">
+            <span>Assets</span>
+            <strong className="pos">{fmt(summary.assets)}</strong>
+          </div>
+          {GROUPS.filter((g) => g.kind === "asset").map((g) => (
+            <div key={g.key} className="summary-row sub">
+              <span className="muted">{g.label}</span>
+              <span>{fmt(summary.byGroup[g.key] || 0)}</span>
+            </div>
+          ))}
+          <div className="summary-row total">
+            <span>Debt</span>
+            <strong className="neg">{fmt(summary.debt)}</strong>
+          </div>
+          {GROUPS.filter((g) => g.kind === "liability").map((g) => (
+            <div key={g.key} className="summary-row sub">
+              <span className="muted">{g.label}</span>
+              <span>{fmt(summary.byGroup[g.key] || 0)}</span>
+            </div>
+          ))}
+          <div className="summary-row net">
+            <span>Net worth</span>
+            <strong className={netWorth >= 0 ? "pos" : "neg"}>{fmt(netWorth)}</strong>
+          </div>
+        </aside>
+      </div>
 
       {modal && (
         <AccountModal initial={modal.initial} onSubmit={submitModal} onClose={() => setModal(null)} />
