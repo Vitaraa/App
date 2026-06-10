@@ -93,7 +93,7 @@ export default function Transactions({ txns, reload }) {
     setImportMsg("");
     setBusy(true);
     try {
-      const items = await parseStatementFile(file);
+      const { items, last4 } = await parseStatementFile(file);
       if (!items.length) {
         setError(
           "Couldn't find any transactions in that file. CSV exports work best; " +
@@ -101,10 +101,12 @@ export default function Transactions({ txns, reload }) {
         );
         return;
       }
-      const res = await api.importTransactions(items);
+      const res = await api.importTransactions(items, last4);
       const parts = [`Imported ${res.imported}`];
       if (res.flagged) parts.push(`${res.flagged} flagged for review`);
       if (res.skipped) parts.push(`${res.skipped} skipped (duplicates)`);
+      if (res.linkedAccount) parts.push(`linked to ${res.linkedAccount}`);
+      else if (res.last4) parts.push(`no account matches •${res.last4} (set it on an account to link)`);
       setImportMsg(parts.join(" · "));
       reload();
     } catch (err) {

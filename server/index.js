@@ -81,20 +81,28 @@ app.get("/api/transactions", auth, (req, res) => {
   res.json(rows);
 });
 
+// Validate that an account id (if given) belongs to the user; returns id or null.
+function ownedAccountId(userId, accountId) {
+  if (accountId == null) return null;
+  const a = db.prepare("SELECT id FROM accounts WHERE id = ? AND user_id = ?").get(accountId, userId);
+  return a ? a.id : null;
+}
+
 app.post("/api/transactions", auth, (req, res) => {
-  const { type, amount, category, note, date } = req.body || {};
+  const { type, amount, category, note, date, account_id } = req.body || {};
   if (!["income", "expense"].includes(type))
     return res.status(400).json({ error: "type must be 'income' or 'expense'" });
   const amt = Number(amount);
   if (!Number.isFinite(amt) || amt <= 0)
     return res.status(400).json({ error: "amount must be a positive number" });
 
+  const acctId = ownedAccountId(req.user.id, account_id);
   const info = db
     .prepare(
-      `INSERT INTO transactions (user_id, type, amount, category, note, date, description, needs_review, source)
-       VALUES (?, ?, ?, ?, ?, COALESCE(?, date('now')), '', 0, 'manual')`
+      `INSERT INTO transactions (user_id, type, amount, category, note, date, description, needs_review, source, account_id)
+       VALUES (?, ?, ?, ?, ?, COALESCE(?, date('now')), '', 0, 'manual', ?)`
     )
-    .run(req.user.id, type, amt, category || "Other", note || "", date || null);
+    .run(req.user.id, type, amt, category || "Other", note || "", date || null, acctId);
   const row = db.prepare("SELECT * FROM transactions WHERE id = ?").get(info.lastInsertRowid);
   res.status(201).json(row);
 });
@@ -159,6 +167,16 @@ app.post("/api/transactions/import", auth, (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : null;
   if (!items) return res.status(400).json({ error: "items array required" });
 
+  // Link this import to an account by the statement's last 4 digits.
+  const last4 = clean4(req.body?.last4);
+  let linkedAccount = null;
+  if (last4) {
+    linkedAccount = db
+      .prepare("SELECT id, name FROM accounts WHERE user_id = ? AND last4 = ?")
+      .get(req.user.id, last4);
+  }
+  const accountId = linkedAccount ? linkedAccount.id : null;
+
   const learned = db
     .prepare("SELECT pattern, category FROM category_rules WHERE user_id = ?")
     .all(req.user.id);
@@ -174,8 +192,8 @@ app.post("/api/transactions/import", auth, (req, res) => {
   );
 
   const insert = db.prepare(
-    `INSERT INTO transactions (user_id, type, amount, category, note, date, description, needs_review, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'import')`
+    `INSERT INTO transactions (user_id, type, amount, category, note, date, description, needs_review, source, account_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'import', ?)`
   );
 
   let imported = 0;
@@ -205,7 +223,7 @@ app.post("/api/transactions/import", auth, (req, res) => {
       if (needsReview) flagged++;
 
       const info = insert.run(
-        req.user.id, type, amt, category, "", date, description, needsReview
+        req.user.id, type, amt, category, "", date, description, needsReview, accountId
       );
       rows.push(db.prepare("SELECT * FROM transactions WHERE id = ?").get(info.lastInsertRowid));
       imported++;
@@ -213,7 +231,10 @@ app.post("/api/transactions/import", auth, (req, res) => {
   });
   run();
 
-  res.status(201).json({ imported, flagged, skipped, rows });
+  res.status(201).json({
+    imported, flagged, skipped, rows, last4,
+    linkedAccount: linkedAccount ? linkedAccount.name : null,
+  });
 });
 
 app.delete("/api/transactions/:id", auth, (req, res) => {
@@ -245,6 +266,15 @@ const TYPE_GROUP = {
 const groupForType = (type) => TYPE_GROUP[type] || "cash";
 // A chosen group (for "other" types) wins; otherwise derive from the type.
 const resolveGroup = (type, group) => (VALID_GROUPS.has(group) ? group : groupForType(type));
+
+// How a transaction moves an account's balance. Assets: income adds, expense
+// subtracts. Liabilities (cards/loans, balance = amount owed): a charge
+// (expense) adds to what's owed, a payment (income) reduces it.
+function signedDelta(kind, type, amount) {
+  const amt = Number(amount) || 0;
+  if (kind === "liability") return type === "expense" ? amt : -amt;
+  return type === "income" ? amt : -amt;
+}
 
 // Compute market value + cost basis for a set of holdings using live quotes.
 function valueHoldings(holdings, quotes) {
@@ -283,6 +313,21 @@ app.get("/api/accounts", auth, async (req, res) => {
     }
   }
 
+  // Net of linked transactions per non-investment account.
+  const kindByAccount = {};
+  for (const a of accts) {
+    kindByAccount[a.id] = GROUP_KIND[a.account_group || groupForType(a.type)] || a.kind;
+  }
+  const linked = db
+    .prepare("SELECT account_id, type, amount FROM transactions WHERE user_id = ? AND account_id IS NOT NULL")
+    .all(req.user.id);
+  const deltaByAccount = {};
+  for (const t of linked) {
+    const k = kindByAccount[t.account_id];
+    if (!k) continue;
+    deltaByAccount[t.account_id] = (deltaByAccount[t.account_id] || 0) + signedDelta(k, t.type, t.amount);
+  }
+
   const out = accts.map((a) => {
     const group = a.account_group || groupForType(a.type);
     const kind = GROUP_KIND[group] || a.kind;
@@ -293,7 +338,11 @@ app.get("/api/accounts", auth, async (req, res) => {
         growth: round2(value - cost), holdingsCount: (byAccount[a.id] || []).length,
       };
     }
-    return { ...a, account_group: group, kind, value: a.balance };
+    // value = starting balance + net of linked transactions
+    return {
+      ...a, account_group: group, kind,
+      value: round2(Number(a.balance) + (deltaByAccount[a.id] || 0)),
+    };
   });
   res.json(out);
 });
@@ -518,8 +567,10 @@ app.get("/api/quotes", auth, async (req, res) => {
   }
 });
 
+const clean4 = (v) => String(v || "").replace(/\D/g, "").slice(-4);
+
 app.post("/api/accounts", auth, (req, res) => {
-  const { name, balance, type, institution, group } = req.body || {};
+  const { name, balance, type, institution, group, last4 } = req.body || {};
   if (!name || !String(name).trim())
     return res.status(400).json({ error: "name is required" });
   const t = type && (TYPE_GROUP[type] || type === "other") ? type : "other";
@@ -527,9 +578,9 @@ app.post("/api/accounts", auth, (req, res) => {
   const k = GROUP_KIND[grp] || "asset";
   const info = db
     .prepare(
-      "INSERT INTO accounts (user_id, name, kind, balance, type, institution, account_group) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO accounts (user_id, name, kind, balance, type, institution, account_group, last4) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
-    .run(req.user.id, String(name).trim(), k, Number(balance) || 0, t, String(institution || "other"), grp);
+    .run(req.user.id, String(name).trim(), k, Number(balance) || 0, t, String(institution || "other"), grp, clean4(last4));
   res.status(201).json(db.prepare("SELECT * FROM accounts WHERE id = ?").get(info.lastInsertRowid));
 });
 
@@ -538,12 +589,12 @@ app.patch("/api/accounts/:id", auth, (req, res) => {
     .prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?")
     .get(req.params.id, req.user.id);
   if (!row) return res.status(404).json({ error: "Not found" });
-  const { name, balance, type, institution, group } = req.body || {};
+  const { name, balance, type, institution, group, last4 } = req.body || {};
   const nextType = type && (TYPE_GROUP[type] || type === "other") ? type : row.type;
   const nextGroup = resolveGroup(nextType, group != null ? group : row.account_group);
   const nextKind = GROUP_KIND[nextGroup] || row.kind;
   db.prepare(
-    "UPDATE accounts SET name = ?, kind = ?, balance = ?, type = ?, institution = ?, account_group = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
+    "UPDATE accounts SET name = ?, kind = ?, balance = ?, type = ?, institution = ?, account_group = ?, last4 = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?"
   ).run(
     name != null ? String(name).trim() : row.name,
     nextKind,
@@ -551,10 +602,26 @@ app.patch("/api/accounts/:id", auth, (req, res) => {
     nextType,
     institution != null ? String(institution) : row.institution,
     nextGroup,
+    last4 != null ? clean4(last4) : row.last4,
     row.id,
     req.user.id
   );
   res.json(db.prepare("SELECT * FROM accounts WHERE id = ?").get(row.id));
+});
+
+// Transactions linked to one account (for the account transactions window).
+app.get("/api/accounts/:id/transactions", auth, (req, res) => {
+  const acct = db
+    .prepare("SELECT id FROM accounts WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.user.id);
+  if (!acct) return res.status(404).json({ error: "Not found" });
+  res.json(
+    db
+      .prepare(
+        "SELECT * FROM transactions WHERE account_id = ? AND user_id = ? ORDER BY date DESC, id DESC"
+      )
+      .all(req.params.id, req.user.id)
+  );
 });
 
 app.delete("/api/accounts/:id", auth, (req, res) => {

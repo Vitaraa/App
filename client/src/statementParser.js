@@ -70,6 +70,22 @@ export function isStatementSummaryLine(text) {
   return SUMMARY_RE.test(String(text || ""));
 }
 
+// Best-effort detection of the card/account number's last 4 digits, used to
+// auto-link an import to an account. Handles masked numbers like
+// "4500 XXXX XXXX 2739", "•••• 2739", and "ending in 2739".
+export function detectLast4(text) {
+  const s = String(text || "");
+  // A masked card number: groups of 4 (digits or X/*/•) ending in 4 real digits.
+  let m = s.match(/(?:[\dxX*•]{4}[\s-]*){2,}(\d{4})\b/);
+  if (m) return m[1];
+  m = s.match(/(?:ending(?:\s+in)?|acct\.?|account|card)\s*(?:no\.?|number|#)?[:\s.#xX*•-]{0,8}(\d{4})\b/i);
+  if (m) return m[1];
+  // A single masked group then 4 digits, e.g. "•••• 5678" or "****5678".
+  m = s.match(/[xX*•]{2,}[\s-]*(\d{4})\b/);
+  if (m) return m[1];
+  return "";
+}
+
 // ---- CSV --------------------------------------------------------------------
 // Minimal RFC-4180-ish parser that handles quoted fields and embedded commas.
 function parseCsvText(text) {
@@ -257,19 +273,16 @@ export async function parsePdf(arrayBuffer) {
 
     out.push({ date, description: description.slice(0, 300), amount: Math.abs(amount), type });
   }
-  return out;
+  return { items: out, last4: detectLast4(lines.join("\n")) };
 }
 
 // ---- Dispatch ---------------------------------------------------------------
 export async function parseStatementFile(file) {
   const name = (file.name || "").toLowerCase();
-  if (name.endsWith(".csv") || file.type === "text/csv") {
-    return parseCsv(await file.text());
-  }
   if (name.endsWith(".pdf") || file.type === "application/pdf") {
-    return parsePdf(await file.arrayBuffer());
+    return parsePdf(await file.arrayBuffer()); // { items, last4 }
   }
-  // Fallback: try CSV (some banks export .txt).
+  // CSV (or .txt fallback).
   const text = await file.text();
-  return parseCsv(text);
+  return { items: parseCsv(text), last4: detectLast4(text) };
 }

@@ -947,6 +947,25 @@ select:focus {
   font-size: 0.85rem;
   text-align: right;
 }
+.acct-itemval {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.acct-clickable {
+  cursor: pointer;
+  border-radius: 8px;
+}
+.acct-clickable:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.modal-wide {
+  max-width: 560px;
+}
+.acct-tx-list {
+  max-height: 60vh;
+}
 .link.sm {
   font-size: 0.8rem;
 }

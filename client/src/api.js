@@ -34,9 +34,10 @@ export const api = {
   addTransaction: (tx) => request("/transactions", { method: "POST", body: tx }),
   updateTransaction: (id, patch) =>
     request(`/transactions/${id}`, { method: "PATCH", body: patch }),
-  importTransactions: (items) =>
-    request("/transactions/import", { method: "POST", body: { items } }),
+  importTransactions: (items, last4) =>
+    request("/transactions/import", { method: "POST", body: { items, last4 } }),
   deleteTransaction: (id) => request(`/transactions/${id}`, { method: "DELETE" }),
+  listAccountTransactions: (id) => request(`/accounts/${id}/transactions`),
 
   // Accounts (net worth)
   listAccounts: () => request("/accounts"),

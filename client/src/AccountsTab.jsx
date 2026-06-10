@@ -10,9 +10,66 @@ import {
   kindForGroup,
 } from "./institutions.js";
 import InvestmentHoldings from "./InvestmentHoldings.jsx";
+import { shortenMerchant } from "./merchant.js";
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
+
+// Window listing the transactions linked to one account.
+function AccountTxModal({ account, onClose }) {
+  const [txns, setTxns] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let live = true;
+    api
+      .listAccountTransactions(account.id)
+      .then((r) => live && setTxns(r))
+      .catch(() => live && setTxns([]))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [account.id]);
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="modal-head">
+          <span className="modal-title">{account.name} · transactions</span>
+          <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        {loading ? (
+          <p className="muted sm">Loading…</p>
+        ) : txns.length === 0 ? (
+          <p className="muted sm">
+            No transactions linked yet. Import a statement whose last 4 digits match this account
+            {account.last4 ? ` (${account.last4})` : ""}.
+          </p>
+        ) : (
+          <ul className="drill-list acct-tx-list">
+            {txns.map((t) => (
+              <li key={t.id}>
+                <span className="drill-name" title={t.description || t.category}>
+                  {t.description ? shortenMerchant(t.description) : t.category}
+                </span>
+                <span className="muted drill-cat">{t.category}</span>
+                <span className="muted drill-date">{t.date}</span>
+                <span className={t.type === "income" ? "pos" : "neg"}>
+                  {t.type === "income" ? "+" : "-"}{fmt(t.amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // Net-worth value: server-computed `value` (investments price live) when
 // present, else the stored balance.
@@ -60,6 +117,7 @@ function AccountModal({ initial, onSubmit, onClose }) {
               institution: f.institution,
               balance: isInvestment ? 0 : Number(f.balance) || 0,
               group: isOther ? f.group : undefined,
+              last4: f.last4 || "",
             });
           }}
         >
@@ -101,9 +159,21 @@ function AccountModal({ initial, onSubmit, onClose }) {
           {isInvestment ? (
             <p className="muted form-note">Add stock holdings after creating.</p>
           ) : (
-            <div className="field">
-              <label>Balance</label>
-              <input type="number" step="0.01" value={f.balance} onChange={set("balance")} placeholder="0.00" />
+            <div className="field-row">
+              <div className="field">
+                <label>Starting balance</label>
+                <input type="number" step="0.01" value={f.balance} onChange={set("balance")} placeholder="0.00" />
+              </div>
+              <div className="field">
+                <label>Last 4 digits</label>
+                <input
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={f.last4}
+                  onChange={set("last4")}
+                  placeholder="e.g. 2739"
+                />
+              </div>
             </div>
           )}
           <div className="modal-actions">
@@ -123,6 +193,7 @@ export default function AccountsTab() {
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null); // null | { initial }
   const [expandedId, setExpandedId] = useState(null);
+  const [txAccount, setTxAccount] = useState(null); // account whose txns window is open
 
   async function load() {
     try {
@@ -145,11 +216,14 @@ export default function AccountsTab() {
   );
 
   function openAdd() {
-    setModal({ initial: { name: "", type: "chequing", institution: "rbc", balance: "", group: "" } });
+    setModal({ initial: { name: "", type: "chequing", institution: "rbc", balance: "", group: "", last4: "" } });
   }
   function openEdit(a) {
     setModal({
-      initial: { id: a.id, name: a.name, type: a.type, institution: a.institution, balance: a.balance, group: accountGroup(a) },
+      initial: {
+        id: a.id, name: a.name, type: a.type, institution: a.institution,
+        balance: a.balance, group: accountGroup(a), last4: a.last4 || "",
+      },
     });
   }
   async function submitModal(data) {
@@ -161,12 +235,6 @@ export default function AccountsTab() {
     } catch (e) {
       setError(e.message);
     }
-  }
-  async function saveBalance(a, value) {
-    const bal = Number(value);
-    if (!Number.isFinite(bal) || bal === a.balance) return;
-    await api.updateAccount(a.id, { balance: bal });
-    load();
   }
   async function remove(id) {
     await api.deleteAccount(id);
@@ -203,21 +271,22 @@ export default function AccountsTab() {
       );
     }
     return (
-      <div key={a.id} className="acct-item">
+      <div
+        key={a.id}
+        className="acct-item acct-clickable"
+        onClick={() => setTxAccount(a)}
+        title="View transactions"
+      >
         <Badge institution={a.institution} />
         <div className="acct-info">
           <span className="acct-itemname">{a.name}</span>
-          <span className="acct-type muted">{typeLabel(a.type)}</span>
+          <span className="acct-type muted">
+            {typeLabel(a.type)}{a.last4 ? ` ··${a.last4}` : ""}
+          </span>
         </div>
-        <input
-          className="acct-itembal"
-          type="number"
-          step="0.01"
-          defaultValue={a.balance}
-          onBlur={(e) => saveBalance(a, e.target.value)}
-        />
-        <button className="link sm" onClick={() => openEdit(a)}>Edit</button>
-        <button className="x" title="Delete" onClick={() => remove(a.id)}>×</button>
+        <span className="acct-itemval">{fmt(acctValue(a))}</span>
+        <button className="link sm" onClick={(e) => { e.stopPropagation(); openEdit(a); }}>Edit</button>
+        <button className="x" title="Delete" onClick={(e) => { e.stopPropagation(); remove(a.id); }}>×</button>
       </div>
     );
   }
@@ -256,6 +325,7 @@ export default function AccountsTab() {
       {modal && (
         <AccountModal initial={modal.initial} onSubmit={submitModal} onClose={() => setModal(null)} />
       )}
+      {txAccount && <AccountTxModal account={txAccount} onClose={() => setTxAccount(null)} />}
     </div>
   );
 }

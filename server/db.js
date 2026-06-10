@@ -127,6 +127,10 @@ if (!txCols.includes("source")) {
   // 'manual' or 'import'
   addColumn("ALTER TABLE transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
 }
+if (!txCols.includes("account_id")) {
+  // Optional link to the account this transaction belongs to.
+  addColumn("ALTER TABLE transactions ADD COLUMN account_id INTEGER");
+}
 
 // accounts gained a finer `type` and an `institution` (for the icon badge) in
 // the Accounts tab release; older account rows predate them.
@@ -141,6 +145,11 @@ if (!acctCols.includes("account_group")) {
   // Display group: cash | investments | credit_cards | loans. ('group' is a SQL
   // keyword, so the column is named account_group.) Empty = derive from type.
   addColumn("ALTER TABLE accounts ADD COLUMN account_group TEXT NOT NULL DEFAULT ''");
+}
+if (!acctCols.includes("last4")) {
+  // Last 4 digits of the card/account number, used to auto-link imported
+  // statement transactions to this account.
+  addColumn("ALTER TABLE accounts ADD COLUMN last4 TEXT NOT NULL DEFAULT ''");
 }
 
 export default db;
