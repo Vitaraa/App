@@ -9,6 +9,7 @@ import {
   CartesianGrid,
   ReferenceDot,
   ReferenceLine,
+  Legend,
 } from "recharts";
 import { api } from "./api.js";
 import PageActions from "./PageActions.jsx";
@@ -82,9 +83,10 @@ export default function ForesightTab({ txns = [] }) {
   const [editing, setEditing] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [newKind, setNewKind] = useState("retirement");
-  const [newName, setNewName] = useState("");
   const [sliderPos, setSliderPos] = useState(0.5); // job raise-allocation slider
   const [drag, setDrag] = useState(null); // { id, year, moved } while dragging a marker
+  const [menuOpen, setMenuOpen] = useState(false); // new-plan type dropdown
+  const [draft, setDraft] = useState(null); // in-progress new plan being created
   const currentYear = new Date().getFullYear();
 
   async function load() {
@@ -102,6 +104,16 @@ export default function ForesightTab({ txns = [] }) {
   useEffect(() => {
     load();
   }, []);
+
+  // Close the new-plan dropdown when clicking outside of it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e) => {
+      if (!e.target.closest || !e.target.closest(".new-plan-dd")) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [menuOpen]);
 
   const netWorth = useMemo(
     () =>
@@ -285,6 +297,55 @@ export default function ForesightTab({ txns = [] }) {
     return { data, markers, xMax, ro, gradientOffset, latest: data[data.length - 1]?.NetWorth || 0 };
   }, [effectivePlans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
 
+  // Projected MONTHLY budget year by year — how income, expenses and leftover
+  // savings change as plans kick in (a job raises income, a house adds a
+  // mortgage, kids add cost, retirement swaps salary for drawdown spending).
+  const budgetChart = useMemo(() => {
+    if (!effectivePlans.length) return null;
+    const retireY = effectivePlans.find((p) => p.kind === "retirement")?.target_year || null;
+    const xMaxLocal = Math.max(lifeYear, currentYear + 1, ...effectivePlans.map((p) => p.target_year || 0));
+    const data = [];
+    for (let y = currentYear; y <= xMaxLocal; y++) {
+      const retired = retireY && y > retireY;
+      let income = retired ? 0 : monthlyIncome;
+      let expense = retired ? retireSpending : plannedExpense;
+      for (const p of effectivePlans) {
+        const c = parseConfig(p);
+        const sY = p.target_year || currentYear;
+        const eY = Number(c.end_year) || sY;
+        const amt = Number(p.target_amount) || 0;
+        if (p.kind === "job" && !retired && y >= sY) {
+          const takeHome = afterTaxIncome(amt) / 12;
+          const delta = takeHome - monthlyIncome;
+          income = takeHome;
+          if (delta > 0) {
+            const rate = monthlyIncome > 0 ? Math.min(1, Math.max(0, surplus / monthlyIncome)) : 1;
+            expense += delta - investedExtra(c.invest_pos ?? 0.5, delta, rate); // the lifestyle (un-invested) part of the raise
+          }
+        } else if (p.kind === "house" && sY > currentYear && y >= sY) {
+          const price = amt;
+          const down = p.down_payment != null && p.down_payment !== "" ? Number(p.down_payment) : price * 0.2;
+          const term = p.loan_term ?? 25;
+          if (y < sY + term) expense += Math.max(0, mortgagePayment(Math.max(0, price - down), p.loan_rate ?? 5.5, term) - currentHousing);
+        } else if (p.kind === "kids" && y >= sY && y <= eY) {
+          expense += amt / 12;
+        } else if (p.kind === "education" && y >= sY && y <= eY) {
+          const schoolInc = c.school_income != null && c.school_income !== "" ? Number(c.school_income) : monthlyIncome * 12;
+          if (!retired) income = schoolInc / 12;
+          expense += amt / 12;
+        } else if (p.kind === "pension" && y >= sY) {
+          income += amt / 12;
+        } else if (p.kind === "income" && !c.one_time && y >= sY && y <= eY) {
+          income += amt / 12;
+        } else if (p.kind === "expense" && !c.one_time && y >= sY && y <= eY) {
+          expense += amt / 12;
+        }
+      }
+      data.push({ year: y, Income: Math.round(income), Expenses: Math.round(expense), Savings: Math.round(income - expense) });
+    }
+    return { data, xMax: xMaxLocal };
+  }, [effectivePlans, monthlyIncome, plannedExpense, surplus, retireSpending, currentHousing, currentYear, lifeYear]);
+
   const houseInfo = useMemo(() => {
     if (!plan || plan.kind !== "house") return null;
     const price = plan.target_amount || 0;
@@ -307,19 +368,28 @@ export default function ForesightTab({ txns = [] }) {
       pension: { name: "Pension", target_amount: 15000, target_year: currentYear + 30, return_rate: 0, config: { pension_type: "CPP" } },
     }[kind] || {});
 
-  function openNew() {
-    setNewKind("retirement");
-    setNewName("");
+  // Open a creation window tailored to the chosen plan type, pre-filled with the
+  // type's sensible defaults. The user fills it in, then Create persists it.
+  function openCreate(kind) {
+    const d = planDefaults(kind);
+    setNewKind(kind);
+    setDraft({ kind, ...d });
+    if (kind === "job") setSliderPos(Number((d.config && d.config.invest_pos) ?? 0.5));
+    setMenuOpen(false);
     setNewOpen(true);
   }
   async function createPlan() {
-    const d = planDefaults(newKind);
-    const name = (newName && newName.trim()) || d.name || "Plan";
-    const p = await api.addPlan({ kind: newKind, ...d, name });
+    if (!draft) return;
+    const name = (draft.name && String(draft.name).trim()) || planDefaults(newKind).name || "Plan";
+    const p = await api.addPlan({ ...draft, kind: newKind, name });
     setNewOpen(false);
+    setDraft(null);
     setSelectedId(p.id);
     load();
   }
+  // Field setters for the draft (mirror patch / patchConfig but on local state).
+  const draftField = (field, value) => setDraft((d) => ({ ...d, [field]: value }));
+  const draftConfig = (key, value) => setDraft((d) => ({ ...d, config: { ...parseConfig(d), [key]: value } }));
   async function patch(field, value) {
     if (!plan) return;
     await api.updatePlan(plan.id, { [field]: value });
@@ -379,26 +449,128 @@ export default function ForesightTab({ txns = [] }) {
   const k = plan ? plan.kind : null;
   const fk = (s) => `${s}${plan?.id}${k}`; // input key that refreshes on plan/kind change
 
+  // Type-specific field rows, shared by the edit window (operating on the saved
+  // plan) and each tailored creation window (operating on a local draft).
+  //   kind      which plan type's fields to render
+  //   v         the values object (saved plan or draft)
+  //   c         parsed config of v
+  //   onField   (field, value) => persist a top-level field
+  //   onConfig  (key, value)   => persist a config field
+  //   onSlider  (pos)          => persist the job invest slider
+  //   kf        (s) => unique input key
+  function planFieldRows(kind, v, c, onField, onConfig, onSlider, kf) {
+    return (
+      <>
+        {kind === "retirement" && (
+          <>
+            <label className="field"><span>Retirement year (stop working)</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
+            <label className="field"><span>Investment return % / yr</span><input type="number" step="0.1" defaultValue={v.return_rate} key={kf("r")} onBlur={(e) => onField("return_rate", e.target.value)} /></label>
+            <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={kf("sp")} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
+          </>
+        )}
+        {kind === "house" && (
+          <>
+            <label className="field"><span>Home price</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
+            <label className="field"><span>Purchase year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
+            <label className="field"><span>Down payment</span><input type="number" defaultValue={v.down_payment ?? ""} placeholder={`20% (${fmt((v.target_amount || 0) * 0.2)})`} key={kf("d")} onBlur={(e) => onField("down_payment", e.target.value)} /></label>
+            <label className="field"><span>Mortgage rate %</span><input type="number" step="0.1" defaultValue={v.loan_rate ?? ""} placeholder="5.5" key={kf("lr")} onBlur={(e) => onField("loan_rate", e.target.value)} /></label>
+            <label className="field"><span>Mortgage term (yrs)</span><input type="number" defaultValue={v.loan_term ?? ""} placeholder="25" key={kf("lt")} onBlur={(e) => onField("loan_term", e.target.value)} /></label>
+            <label className="field"><span>Appreciation % / yr</span><input type="number" step="0.1" defaultValue={v.return_rate} key={kf("r")} onBlur={(e) => onField("return_rate", e.target.value)} /></label>
+          </>
+        )}
+        {kind === "job" && (
+          <>
+            <label className="field"><span>New income / yr (gross)</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
+            <label className="field"><span>Start year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
+            <div className="field"><span>Now</span><span className="muted nowval">{fmt(monthlyIncome * 12)}/yr current income</span></div>
+            {(() => {
+              const delta = afterTaxIncome(Number(v.target_amount) || 0) / 12 - monthlyIncome;
+              const rate = monthlyIncome > 0 ? Math.min(1, Math.max(0, surplus / monthlyIncome)) : 1;
+              const extra = investedExtra(sliderPos, delta, rate);
+              const persist = (e) => onSlider(Number(e.target.value));
+              return (
+                <div className="field slider-field">
+                  <span>How much of the raise to invest</span>
+                  <input
+                    type="range" min="0" max="1" step="0.01" value={sliderPos}
+                    onChange={(e) => setSliderPos(Number(e.target.value))}
+                    onMouseUp={persist} onTouchEnd={persist} onKeyUp={persist}
+                  />
+                  <div className="slider-labels"><span>Same</span><span>Proportional</span><span>All</span></div>
+                  <span className="muted slider-readout">
+                    {delta > 0
+                      ? `Investing ${fmt(extra * 12)}/yr of your ${fmt(delta * 12)}/yr after-tax raise — the rest goes to spending.`
+                      : `This job's take-home is about the same or less than your current income, so there's no raise to allocate.`}
+                  </span>
+                </div>
+              );
+            })()}
+          </>
+        )}
+        {kind === "education" && (
+          <>
+            <label className="field"><span>Start year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
+            <label className="field"><span>End year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>
+            <label className="field"><span>Tuition / yr</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
+            <label className="field"><span>Income while studying / yr</span><input type="number" defaultValue={c.school_income ?? ""} placeholder={`Same (${fmt(monthlyIncome * 12)})`} key={kf("si")} onBlur={(e) => onConfig("school_income", e.target.value)} /></label>
+          </>
+        )}
+        {kind === "kids" && (
+          <>
+            <label className="field"><span>Start year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
+            <label className="field"><span>Support until year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>
+            <label className="field"><span>Cost / yr (CA est.)</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
+          </>
+        )}
+        {(kind === "income" || kind === "expense") && (
+          <>
+            <label className="field"><span>{c.one_time ? "Amount" : "Amount / yr"}</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
+            <label className="field"><span>{c.one_time ? "Year" : "Start year"}</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
+            {!c.one_time && <label className="field"><span>End year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>}
+            <label className="field checkbox-field"><span>One-time</span><input type="checkbox" checked={!!c.one_time} onChange={(e) => onConfig("one_time", e.target.checked)} /></label>
+          </>
+        )}
+        {kind === "pension" && (
+          <>
+            <label className="field"><span>Pension type</span><select value={c.pension_type || "CPP"} onChange={(e) => onConfig("pension_type", e.target.value)}>{PENSION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
+            <label className="field"><span>Income / yr</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
+            <label className="field"><span>Starts in year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
+          </>
+        )}
+      </>
+    );
+  }
+
   return (
     <div className="foresight-tab">
       <PageActions>
-        <button className="btn primary sm" onClick={openNew}>+ New plan</button>
+        <div className="new-plan-dd">
+          <button className="btn primary sm" onClick={() => setMenuOpen((v) => !v)}>+ New plan ▾</button>
+          {menuOpen && (
+            <div className="new-plan-menu">
+              {KINDS.map((x) => (
+                <button key={x.key} className="new-plan-menu-item" onClick={() => openCreate(x.key)}>
+                  <span className="legend-ico" aria-hidden="true">{planIcon(x.key)}</span>{x.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </PageActions>
 
-      {newOpen && (
-        <div className="modal-overlay" onClick={() => setNewOpen(false)}>
-          <section className="card plan-modal new-plan-modal" onClick={(e) => e.stopPropagation()}>
+      {newOpen && draft && (
+        <div className="modal-overlay" onClick={() => { setNewOpen(false); setDraft(null); }}>
+          <section className="card plan-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
-              <span className="modal-title">New plan</span>
-              <button className="modal-close" onClick={() => setNewOpen(false)} aria-label="Close">×</button>
+              <span className="modal-title">New {KINDS.find((x) => x.key === newKind)?.label || "plan"}</span>
+              <button className="modal-close" onClick={() => { setNewOpen(false); setDraft(null); }} aria-label="Close">×</button>
             </div>
             <div className="plan-grid">
-              <label className="field"><span>Type</span><select value={newKind} onChange={(e) => setNewKind(e.target.value)}>{KINDS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label>
-              <label className="field"><span>Name</span><input value={newName} placeholder={planDefaults(newKind).name || ""} onChange={(e) => setNewName(e.target.value)} /></label>
+              <label className="field"><span>Name</span><input value={draft.name || ""} onChange={(e) => draftField("name", e.target.value)} /></label>
+              {planFieldRows(newKind, draft, parseConfig(draft), draftField, draftConfig, (pos) => draftConfig("invest_pos", pos), (s) => `new-${newKind}-${s}`)}
             </div>
-            <p className="muted new-plan-hint">A plan is created with sensible defaults — click its dot or name on the graph to fine-tune the amounts.</p>
             <div className="plan-modal-footer">
-              <button className="btn ghost sm" onClick={() => setNewOpen(false)}>Cancel</button>
+              <button className="btn ghost sm" onClick={() => { setNewOpen(false); setDraft(null); }}>Cancel</button>
               <button className="btn primary sm" onClick={createPlan}>Create plan</button>
             </div>
           </section>
@@ -422,82 +594,7 @@ export default function ForesightTab({ txns = [] }) {
                 <label className="field"><span>Name</span><input defaultValue={plan.name} key={fk("n")} onBlur={(e) => patch("name", e.target.value)} /></label>
                 <label className="field"><span>Type</span><select value={plan.kind} onChange={(e) => changeKind(e.target.value)}>{KINDS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label>
 
-                {k === "retirement" && (
-                  <>
-                    <label className="field"><span>Retirement year (stop working)</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                    <label className="field"><span>Investment return % / yr</span><input type="number" step="0.1" defaultValue={plan.return_rate} key={fk("r")} onBlur={(e) => patch("return_rate", e.target.value)} /></label>
-                    <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={fk("sp")} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
-                  </>
-                )}
-                {k === "house" && (
-                  <>
-                    <label className="field"><span>Home price</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
-                    <label className="field"><span>Purchase year</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                    <label className="field"><span>Down payment</span><input type="number" defaultValue={plan.down_payment ?? ""} placeholder={`20% (${fmt((plan.target_amount || 0) * 0.2)})`} key={fk("d")} onBlur={(e) => patch("down_payment", e.target.value)} /></label>
-                    <label className="field"><span>Mortgage rate %</span><input type="number" step="0.1" defaultValue={plan.loan_rate ?? ""} placeholder="5.5" key={fk("lr")} onBlur={(e) => patch("loan_rate", e.target.value)} /></label>
-                    <label className="field"><span>Mortgage term (yrs)</span><input type="number" defaultValue={plan.loan_term ?? ""} placeholder="25" key={fk("lt")} onBlur={(e) => patch("loan_term", e.target.value)} /></label>
-                    <label className="field"><span>Appreciation % / yr</span><input type="number" step="0.1" defaultValue={plan.return_rate} key={fk("r")} onBlur={(e) => patch("return_rate", e.target.value)} /></label>
-                  </>
-                )}
-                {k === "job" && (
-                  <>
-                    <label className="field"><span>New income / yr (gross)</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
-                    <label className="field"><span>Start year</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                    <div className="field"><span>Now</span><span className="muted nowval">{fmt(monthlyIncome * 12)}/yr current income</span></div>
-                    {(() => {
-                      const delta = afterTaxIncome(Number(plan.target_amount) || 0) / 12 - monthlyIncome;
-                      const rate = monthlyIncome > 0 ? Math.min(1, Math.max(0, surplus / monthlyIncome)) : 1;
-                      const extra = investedExtra(sliderPos, delta, rate);
-                      const persist = (e) => patchConfig("invest_pos", Number(e.target.value));
-                      return (
-                        <div className="field slider-field">
-                          <span>How much of the raise to invest</span>
-                          <input
-                            type="range" min="0" max="1" step="0.01" value={sliderPos}
-                            onChange={(e) => setSliderPos(Number(e.target.value))}
-                            onMouseUp={persist} onTouchEnd={persist} onKeyUp={persist}
-                          />
-                          <div className="slider-labels"><span>Same</span><span>Proportional</span><span>All</span></div>
-                          <span className="muted slider-readout">
-                            {delta > 0
-                              ? `Investing ${fmt(extra * 12)}/yr of your ${fmt(delta * 12)}/yr after-tax raise — the rest goes to spending.`
-                              : `This job's take-home is about the same or less than your current income, so there's no raise to allocate.`}
-                          </span>
-                        </div>
-                      );
-                    })()}
-                  </>
-                )}
-                {k === "education" && (
-                  <>
-                    <label className="field"><span>Start year</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                    <label className="field"><span>End year</span><input type="number" defaultValue={cfg.end_year ?? ""} key={fk("e")} onBlur={(e) => patchConfig("end_year", e.target.value)} /></label>
-                    <label className="field"><span>Tuition / yr</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
-                    <label className="field"><span>Income while studying / yr</span><input type="number" defaultValue={cfg.school_income ?? ""} placeholder={`Same (${fmt(monthlyIncome * 12)})`} key={fk("si")} onBlur={(e) => patchConfig("school_income", e.target.value)} /></label>
-                  </>
-                )}
-                {k === "kids" && (
-                  <>
-                    <label className="field"><span>Start year</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                    <label className="field"><span>Support until year</span><input type="number" defaultValue={cfg.end_year ?? ""} key={fk("e")} onBlur={(e) => patchConfig("end_year", e.target.value)} /></label>
-                    <label className="field"><span>Cost / yr (CA est.)</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
-                  </>
-                )}
-                {(k === "income" || k === "expense") && (
-                  <>
-                    <label className="field"><span>{cfg.one_time ? "Amount" : "Amount / yr"}</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
-                    <label className="field"><span>{cfg.one_time ? "Year" : "Start year"}</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                    {!cfg.one_time && <label className="field"><span>End year</span><input type="number" defaultValue={cfg.end_year ?? ""} key={fk("e")} onBlur={(e) => patchConfig("end_year", e.target.value)} /></label>}
-                    <label className="field checkbox-field"><span>One-time</span><input type="checkbox" checked={!!cfg.one_time} onChange={(e) => patchConfig("one_time", e.target.checked)} /></label>
-                  </>
-                )}
-                {k === "pension" && (
-                  <>
-                    <label className="field"><span>Pension type</span><select value={cfg.pension_type || "CPP"} onChange={(e) => patchConfig("pension_type", e.target.value)}>{PENSION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
-                    <label className="field"><span>Income / yr</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
-                    <label className="field"><span>Starts in year</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                  </>
-                )}
+                {planFieldRows(k, plan, cfg, patch, patchConfig, (pos) => patchConfig("invest_pos", pos), fk)}
 
               </div>
               <div className="plan-modal-footer">
@@ -567,30 +664,28 @@ export default function ForesightTab({ txns = [] }) {
             </section>
           )}
 
-          {chart && chart.data.length > 1 && (
-            <section className="card">
-              <span className="muted">Year-by-year</span>
-              <div className="year-table-wrap">
-                <table className="year-table">
-                  <thead>
-                    <tr><th>Year</th><th className="right">Net worth</th><th className="right">Change</th>{retirementYear && <th>Phase</th>}</tr>
-                  </thead>
-                  <tbody>
-                    {chart.data.map((p, i) => {
-                      const prev = i > 0 ? chart.data[i - 1].NetWorth : null;
-                      const change = prev != null ? p.NetWorth - prev : 0;
-                      return (
-                        <tr key={p.year}>
-                          <td>{p.year}</td>
-                          <td className={`right ${p.NetWorth < 0 ? "neg" : ""}`}>{fmtc(p.NetWorth)}</td>
-                          <td className={`right ${change >= 0 ? "pos" : "neg"}`}>{prev != null ? `${change >= 0 ? "+" : ""}${fmtc(change)}` : "—"}</td>
-                          {retirementYear && <td className="muted">{p.year > retirementYear ? "Retired" : "Saving"}</td>}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+          {budgetChart && budgetChart.data.length > 1 && (
+            <section className="card chart-card">
+              <div className="widget-head">
+                <div>
+                  <span className="muted">Projected monthly budget</span>
+                  <div className="widget-value">{fmt(budgetChart.data[0].Savings)}<span className="muted unit"> / mo saved now</span></div>
+                  <span className="muted drag-hint">How income, expenses & savings shift as your plans take effect.</span>
+                </div>
               </div>
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={budgetChart.data} margin={{ top: 16, right: 20, left: 4, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="year" type="number" domain={[currentYear, budgetChart.xMax]} allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                  <YAxis tickLine={false} axisLine={false} width={64} fontSize={12} tickFormatter={fmt} />
+                  <Tooltip formatter={(v) => fmtc(v)} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} />
+                  <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
+                  <Legend />
+                  <Line type="monotone" dataKey="Income" stroke="var(--green)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="Expenses" stroke="var(--red)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="Savings" stroke="var(--accent)" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
             </section>
           )}
 
