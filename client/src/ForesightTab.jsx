@@ -13,7 +13,7 @@ import {
 import { api } from "./api.js";
 import PageActions from "./PageActions.jsx";
 import { accountGroup, kindForGroup } from "./institutions.js";
-import { analyzePlan, simulateNetWorth, mortgagePayment, compoundedSaving, afterTaxIncome, toTodaysDollars } from "./foresight.js";
+import { simulateNetWorth, mortgagePayment, afterTaxIncome, toTodaysDollars } from "./foresight.js";
 
 const INFLATION = 0.025; // annual rate used to show projections in today's dollars
 
@@ -32,7 +32,6 @@ const KINDS = [
   { key: "income", label: "Income (other)" },
   { key: "expense", label: "Expense (other)" },
   { key: "pension", label: "Pension" },
-  { key: "custom", label: "Custom goal" },
 ];
 const PENSION_TYPES = ["CPP", "QPP", "OAS", "GIS", "Workplace pension", "RRSP/RRIF", "Other"];
 const KIDS_DEFAULT = 13000; // ~ annual cost of raising a child in Canada (editable)
@@ -72,6 +71,7 @@ export default function ForesightTab({ txns = [] }) {
   const [newKind, setNewKind] = useState("retirement");
   const [newName, setNewName] = useState("");
   const [sliderPos, setSliderPos] = useState(0.5); // job raise-allocation slider
+  const [drag, setDrag] = useState(null); // { id, year, moved } while dragging a marker
   const currentYear = new Date().getFullYear();
 
   async function load() {
@@ -127,20 +127,6 @@ export default function ForesightTab({ txns = [] }) {
   // Monthly amount available to invest = income minus planned spending.
   const surplus = Math.max(0, monthlyIncome - plannedExpense);
 
-  const catMonthly = useMemo(() => {
-    const months = new Set();
-    const byCat = {};
-    for (const t of txns) {
-      if (t.type !== "expense") continue;
-      months.add(String(t.date).slice(0, 7));
-      byCat[t.category] = (byCat[t.category] || 0) + Number(t.amount || 0);
-    }
-    const n = Math.max(1, months.size);
-    return Object.entries(byCat)
-      .map(([cat, total]) => ({ cat, monthly: total / n }))
-      .sort((a, b) => b.monthly - a.monthly);
-  }, [txns]);
-
   const age = Number(settings.fs_age) || 30;
   const lifeExp = Number(settings.fs_life) || 90;
   const retireSpending =
@@ -150,7 +136,15 @@ export default function ForesightTab({ txns = [] }) {
 
   const plan = plans.find((p) => p.id === selectedId) || plans[0] || null;
   const cfg = parseConfig(plan);
-  const retirementYear = plans.find((p) => p.kind === "retirement")?.target_year || null;
+
+  // While a marker is being dragged, override that plan's year so the whole
+  // projection (line + markers) recomputes live; the real data is only written
+  // back on release.
+  const effectivePlans = useMemo(
+    () => (drag ? plans.map((p) => (p.id === drag.id ? { ...p, target_year: drag.year } : p)) : plans),
+    [plans, drag]
+  );
+  const retirementYear = effectivePlans.find((p) => p.kind === "retirement")?.target_year || null;
 
   // Keep the job raise-allocation slider in sync with the plan being edited.
   useEffect(() => {
@@ -160,22 +154,14 @@ export default function ForesightTab({ txns = [] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, selectedId, plan?.kind]);
 
-  function analyzeSavings(p) {
-    const years = (p.target_year || currentYear) - currentYear;
-    return {
-      ...analyzePlan({ start: netWorth, target: p.target_amount, rate: p.return_rate, years, contribution: surplus, monthlyIncome }),
-      years,
-    };
-  }
-  const sel = plan && (plan.kind === "retirement" || plan.kind === "custom") ? analyzeSavings(plan) : null;
 
   const chart = useMemo(() => {
-    if (!plans.length) return null;
-    const investReturn = plans.find((p) => p.kind === "retirement" || p.kind === "custom")?.return_rate ?? 7;
+    if (!effectivePlans.length) return null;
+    const investReturn = effectivePlans.find((p) => p.kind === "retirement")?.return_rate ?? 7;
     const houses = [];
     const flows = [];
     const lumps = [];
-    for (const p of plans) {
+    for (const p of effectivePlans) {
       const c = parseConfig(p);
       const startY = p.target_year || currentYear;
       const endY = Number(c.end_year) || startY;
@@ -220,7 +206,7 @@ export default function ForesightTab({ txns = [] }) {
           break;
       }
     }
-    const xMax = Math.max(lifeYear, currentYear + 1, ...plans.map((p) => p.target_year || 0));
+    const xMax = Math.max(lifeYear, currentYear + 1, ...effectivePlans.map((p) => p.target_year || 0));
     const { series } = simulateNetWorth({
       startNetWorth: netWorth,
       surplus,
@@ -247,22 +233,20 @@ export default function ForesightTab({ txns = [] }) {
       }
       return v;
     };
-    const crossing = (target) => {
-      for (const p of data) if (p.NetWorth >= target) return p.year;
-      return null;
-    };
-    const markers = plans.map((p) => {
+    const markers = effectivePlans.map((p) => {
       const c = parseConfig(p);
       const startY = p.target_year || currentYear;
       const endY = Number(c.end_year) || startY;
       const amt = Number(p.target_amount) || 0;
-      if (p.kind === "retirement" || p.kind === "custom") {
-        const deadline = startY;
-        const cross = crossing(amt);
-        if (cross != null && cross <= deadline) return { id: p.id, name: p.name, x: cross, y: amt, color: "var(--green)", status: `on track — reaches ${fmt(amt)} in ${cross}` };
-        const v = valueAt(deadline);
-        if (cross != null) return { id: p.id, name: p.name, x: deadline, y: v, color: "#fbbf24", status: `reaches ${fmt(amt)} in ${cross}, after your ${deadline} target` };
-        return { id: p.id, name: p.name, x: deadline, y: v, color: "var(--red)", status: `${fmt(Math.max(0, amt - v))} short by ${deadline}` };
+      if (p.kind === "retirement") {
+        // "What if I stop working in this year": mark the retirement year with the
+        // net worth you'd have, then whether the drawdown lasts through life. The
+        // run-out year (if any) is stated by the dedicated warning line below.
+        const ry = startY;
+        const v = valueAt(ry);
+        const lasts = !data.some((d) => d.year > ry && d.NetWorth < 0);
+        const status = `retire ${ry} with ${fmt(v)} saved, then ${fmt(retireSpending)}/mo` + (lasts ? ` — lasts through ${lifeYear}` : "");
+        return { id: p.id, name: p.name, x: ry, y: v, color: lasts ? "var(--green)" : "var(--red)", status };
       }
       let status;
       if (p.kind === "house") status = `buy ${fmt(amt)} home in ${startY}`;
@@ -286,7 +270,7 @@ export default function ForesightTab({ txns = [] }) {
     const dataMin = Math.min(...vals, 0);
     const gradientOffset = dataMax <= 0 ? 0 : dataMin >= 0 ? 1 : dataMax / (dataMax - dataMin);
     return { data, markers, xMax, ro, gradientOffset, latest: data[data.length - 1]?.NetWorth || 0 };
-  }, [plans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
+  }, [effectivePlans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
 
   const houseInfo = useMemo(() => {
     if (!plan || plan.kind !== "house") return null;
@@ -296,20 +280,12 @@ export default function ForesightTab({ txns = [] }) {
     return { down, pay, delta: pay - currentHousing };
   }, [plan, currentHousing]);
 
-  const recs = useMemo(() => {
-    if (!sel || sel.years <= 0) return [];
-    return catMonthly
-      .filter((c) => c.monthly >= 20)
-      .slice(0, 4)
-      .map((c) => ({ cat: c.cat, monthly: c.monthly, saving: c.monthly * 0.25, grows: compoundedSaving(c.monthly * 0.25, plan.return_rate, sel.years) }));
-  }, [catMonthly, sel, plan]);
 
   // Sensible defaults for each plan type — shared by "New plan" and type-switch.
   const planDefaults = (kind) =>
     ({
       retirement: { name: "Retirement", target_amount: 1000000, target_year: currentYear + 30, return_rate: 7, config: {} },
       house: { name: "Home", target_amount: 500000, target_year: currentYear + 5, return_rate: 3, down_payment: null, loan_rate: 5.5, loan_term: 25, config: {} },
-      custom: { name: "Goal", target_amount: 50000, target_year: currentYear + 5, return_rate: 7, config: {} },
       job: { name: "New job", target_amount: 80000, target_year: currentYear + 1, return_rate: 0, config: { invest_pos: 0.5 } },
       education: { name: "Education", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 4, school_income: Math.round(monthlyIncome * 12) } },
       kids: { name: "Child", target_amount: KIDS_DEFAULT, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 19 } },
@@ -364,7 +340,29 @@ export default function ForesightTab({ txns = [] }) {
     setEditing(false);
   }
 
-  const monthlyPlan = sel ? (sel.status === "on-track" || sel.status === "reached" ? surplus : sel.required) : 0;
+  // --- Dragging a marker horizontally to change its plan's year -------------
+  function startDrag(id, year) {
+    setDrag({ id, year, moved: false });
+  }
+  function onChartMove(state) {
+    if (!drag || !state) return;
+    const yr = state.activeLabel;
+    if (yr == null) return;
+    const clamped = Math.max(currentYear, Math.min(lifeYear, Math.round(Number(yr))));
+    setDrag((d) => (d && clamped !== d.year ? { ...d, year: clamped, moved: true } : d));
+  }
+  async function endDrag() {
+    if (!drag) return;
+    const d = drag;
+    setDrag(null);
+    if (d.moved) {
+      await api.updatePlan(d.id, { target_year: d.year }); // persist the new year
+      load();
+    } else {
+      openEdit(d.id); // a click without a drag opens the editor
+    }
+  }
+
   const k = plan ? plan.kind : null;
   const fk = (s) => `${s}${plan?.id}${k}`; // input key that refreshes on plan/kind change
 
@@ -411,15 +409,12 @@ export default function ForesightTab({ txns = [] }) {
                 <label className="field"><span>Name</span><input defaultValue={plan.name} key={fk("n")} onBlur={(e) => patch("name", e.target.value)} /></label>
                 <label className="field"><span>Type</span><select value={plan.kind} onChange={(e) => changeKind(e.target.value)}>{KINDS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label>
 
-                {(k === "retirement" || k === "custom") && (
-                  <>
-                    <label className="field"><span>Target amount</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
-                    <label className="field"><span>Target year</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                    <label className="field"><span>Investment return % / yr</span><input type="number" step="0.1" defaultValue={plan.return_rate} key={fk("r")} onBlur={(e) => patch("return_rate", e.target.value)} /></label>
-                  </>
-                )}
                 {k === "retirement" && (
-                  <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={fk("sp")} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
+                  <>
+                    <label className="field"><span>Retirement year (stop working)</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
+                    <label className="field"><span>Investment return % / yr</span><input type="number" step="0.1" defaultValue={plan.return_rate} key={fk("r")} onBlur={(e) => patch("return_rate", e.target.value)} /></label>
+                    <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={fk("sp")} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
+                  </>
                 )}
                 {k === "house" && (
                   <>
@@ -505,13 +500,14 @@ export default function ForesightTab({ txns = [] }) {
                 <div>
                   <span className="muted">Net worth with all plans · today's dollars</span>
                   <div className="widget-value">{fmt(chart.latest)}<span className="muted unit"> by {chart.xMax}</span></div>
+                  <span className="muted drag-hint">Drag a dot left/right to change its year · click it to edit</span>
                 </div>
               </div>
               {chart.data.length <= 1 ? (
                 <p className="muted empty">Set a future year and your age to see the projection.</p>
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={chart.data} margin={{ top: 16, right: 20, left: 4, bottom: 0 }}>
+                  <LineChart data={chart.data} margin={{ top: 16, right: 20, left: 4, bottom: 0 }} onMouseMove={onChartMove} onMouseUp={endDrag} onMouseLeave={endDrag}>
                     <defs>
                       <linearGradient id="nwGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset={chart.gradientOffset} stopColor="var(--green)" />
@@ -525,7 +521,7 @@ export default function ForesightTab({ txns = [] }) {
                     <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
                     <Line type="monotone" dataKey="NetWorth" stroke="url(#nwGradient)" strokeWidth={2.5} dot={false} />
                     {chart.markers.map((m) => (
-                      <ReferenceDot key={m.id} x={m.x} y={m.y} r={6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" onClick={() => openEdit(m.id)} style={{ cursor: "pointer" }} />
+                      <ReferenceDot key={m.id} x={m.x} y={m.y} r={drag && drag.id === m.id ? 8 : 6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" onMouseDown={() => startDrag(m.id, m.x)} style={{ cursor: "ew-resize" }} />
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
@@ -576,41 +572,12 @@ export default function ForesightTab({ txns = [] }) {
                 Down payment {fmtc(houseInfo.down)} up front, then ~{fmtc(houseInfo.pay)}/mo.
                 {currentHousing > 0
                   ? ` That ${houseInfo.delta >= 0 ? "is " + fmtc(houseInfo.delta) + " more" : "frees up " + fmtc(-houseInfo.delta)} than your current ${fmtc(currentHousing)}/mo housing.`
-                  : " Set your current rent/mortgage in Edit plan to see the change to your savings."}
+                  : " Set your current rent/mortgage in Settings to see the change to your savings."}
                 {" "}The home is treated as debt that pays down and appreciates {plan.return_rate}%/yr — not as an investment return.
               </p>
             </section>
           )}
 
-          {sel && sel.status !== "reached" && sel.years > 0 && (
-            <section className="card contrib-card">
-              <span className="muted">To stay on the projected path</span>
-              <div className="contrib-amount">{fmt(monthlyPlan)}<span className="muted unit"> / month</span></div>
-              <p className="muted">
-                Set aside about {fmtc(monthlyPlan)} each month toward <strong>{plan.name}</strong>
-                {sel.status === "behind" ? ` (up from your current ${fmtc(surplus)})` : ""} — invested at {plan.return_rate}% in an investment account.
-                {sel.status === "impossible" ? " Note: this is more than your current income, so this goal isn't reachable as set." : ""}
-              </p>
-            </section>
-          )}
-
-          {sel && (
-            <section className="card">
-              <span className="muted">Where you could cut back</span>
-              {recs.length === 0 ? (
-                <p className="muted empty sm">Not enough spending data yet, or this goal needs a future target year.</p>
-              ) : (
-                <ul className="rec-list">
-                  {recs.map((r) => (
-                    <li key={r.cat} className="rec">
-                      <span className="rec-text">Trim 25% off <strong>{r.cat}</strong> (~{fmtc(r.saving)}/mo of your {fmtc(r.monthly)}/mo)</span>
-                      <span className="rec-grow pos">→ ~{fmt(r.grows)} by {plan.target_year || currentYear}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
         </>
       )}
     </div>
