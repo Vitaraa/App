@@ -1,6 +1,6 @@
 {
   "name": "budget-server",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Backend API for the budgeting dashboard",
   "type": "module",
   "main": "index.js",

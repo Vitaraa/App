@@ -1769,6 +1769,40 @@ select:focus {
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+.year-table-wrap {
+  margin-top: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.year-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+.year-table th {
+  text-align: left;
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.year-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.year-table tr:last-child td {
+  border-bottom: none;
+}
+.year-table .right {
+  text-align: right;
+}
 .contrib-card {
   display: flex;
   flex-direction: column;

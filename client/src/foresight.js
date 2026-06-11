@@ -176,6 +176,8 @@ export function simulateNetWorth(o) {
     }
     for (let m = 0; m < 12; m++) {
       liquid = liquid * (1 + rInv);
+      // After retirement there's no job income, so contributions (savings from
+      // income) stop entirely and we only draw down living expenses.
       if (o.retirementYear && y > o.retirementYear) liquid -= Number(o.retirementSpending) || 0;
       else liquid += contribution;
       for (const h of homes) {

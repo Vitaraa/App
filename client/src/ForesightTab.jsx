@@ -102,6 +102,7 @@ export default function ForesightTab({ txns = [] }) {
     };
   }
   const sel = plan && plan.kind !== "house" ? analyzeSavings(plan) : null;
+  const retirementYear = plans.find((p) => p.kind === "retirement")?.target_year || null;
 
   // One combined net-worth path reflecting ALL plans.
   const chart = useMemo(() => {
@@ -305,6 +306,42 @@ export default function ForesightTab({ txns = [] }) {
                   </li>
                 )}
               </ul>
+            </section>
+          )}
+
+          {chart && chart.data.length > 1 && (
+            <section className="card">
+              <span className="muted">Year-by-year</span>
+              <div className="year-table-wrap">
+                <table className="year-table">
+                  <thead>
+                    <tr>
+                      <th>Year</th>
+                      <th className="right">Net worth</th>
+                      <th className="right">Change</th>
+                      {retirementYear && <th>Phase</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chart.data.map((p, i) => {
+                      const prev = i > 0 ? chart.data[i - 1].NetWorth : null;
+                      const change = prev != null ? p.NetWorth - prev : 0;
+                      return (
+                        <tr key={p.year}>
+                          <td>{p.year}</td>
+                          <td className={`right ${p.NetWorth < 0 ? "neg" : ""}`}>{fmtc(p.NetWorth)}</td>
+                          <td className={`right ${change >= 0 ? "pos" : "neg"}`}>
+                            {prev != null ? `${change >= 0 ? "+" : ""}${fmtc(change)}` : "—"}
+                          </td>
+                          {retirementYear && (
+                            <td className="muted">{p.year > retirementYear ? "Retired" : "Saving"}</td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
 
