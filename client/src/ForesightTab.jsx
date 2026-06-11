@@ -80,7 +80,7 @@ export default function ForesightTab({ txns = [] }) {
       }, 0),
     [accounts]
   );
-  const { monthlyIncome, monthlyExpense } = useMemo(() => {
+  const { monthlyIncomeTxn, monthlyExpenseTxn } = useMemo(() => {
     const months = new Set();
     let inc = 0;
     let exp = 0;
@@ -90,18 +90,22 @@ export default function ForesightTab({ txns = [] }) {
       else exp += Number(t.amount || 0);
     }
     const n = Math.max(1, months.size);
-    return { monthlyIncome: inc / n, monthlyExpense: exp / n };
+    return { monthlyIncomeTxn: inc / n, monthlyExpenseTxn: exp / n };
   }, [txns]);
 
-  // What the user actually plans to spend each month — the sum of their Budget-tab
-  // category limits. This is the basis for how much can be invested, instead of
-  // assuming every dollar of income is saved.
-  const budgetedExpense = useMemo(
-    () => budgets.reduce((s, b) => s + Number(b.amount || 0), 0),
+  // The user's Budget tab is the source of truth for monthly income and spending.
+  // Sum the income-type and expense-type categories separately; fall back to
+  // observed transactions when a side of the budget hasn't been set.
+  const budgetedIncome = useMemo(
+    () => budgets.filter((b) => b.type === "income").reduce((s, b) => s + Number(b.amount || 0), 0),
     [budgets]
   );
-  // Use the budget when one is set; otherwise fall back to observed spending.
-  const plannedExpense = budgetedExpense > 0 ? budgetedExpense : monthlyExpense;
+  const budgetedExpense = useMemo(
+    () => budgets.filter((b) => b.type !== "income").reduce((s, b) => s + Number(b.amount || 0), 0),
+    [budgets]
+  );
+  const monthlyIncome = budgetedIncome > 0 ? budgetedIncome : monthlyIncomeTxn;
+  const plannedExpense = budgetedExpense > 0 ? budgetedExpense : monthlyExpenseTxn;
   // Monthly amount available to invest = income minus planned spending.
   const surplus = Math.max(0, monthlyIncome - plannedExpense);
 

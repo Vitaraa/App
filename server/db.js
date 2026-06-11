@@ -199,6 +199,11 @@ const budgetCols = db.prepare("PRAGMA table_info(budgets)").all().map((c) => c.n
 if (!budgetCols.includes("icon")) {
   addColumn("ALTER TABLE budgets ADD COLUMN icon TEXT NOT NULL DEFAULT ''");
 }
+if (!budgetCols.includes("type")) {
+  // 'expense' (a spending limit) or 'income' (expected monthly income). Older
+  // rows predate income budgeting, so they default to expense.
+  addColumn("ALTER TABLE budgets ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'");
+}
 
 // House-plan fields added to plans after the Foresight launch.
 const planCols = db.prepare("PRAGMA table_info(plans)").all().map((c) => c.name);

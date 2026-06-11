@@ -904,15 +904,21 @@ app.post("/api/budgets", auth, (req, res) => {
   const existing = db
     .prepare("SELECT * FROM budgets WHERE user_id = ? AND category = ?")
     .get(req.user.id, category);
-  // amount and icon are independently optional so a limit edit doesn't wipe the
-  // icon and vice versa.
+  // amount, icon and type are independently optional so editing one doesn't wipe
+  // the others.
   const amount =
     req.body?.amount != null ? Math.max(0, Number(req.body.amount) || 0) : existing ? existing.amount : 0;
   const icon = req.body?.icon != null ? String(req.body.icon) : existing ? existing.icon : "";
+  const type =
+    req.body?.type === "income" || req.body?.type === "expense"
+      ? req.body.type
+      : existing
+      ? existing.type
+      : "expense";
   db.prepare(
-    `INSERT INTO budgets (user_id, category, amount, icon) VALUES (?, ?, ?, ?)
-     ON CONFLICT(user_id, category) DO UPDATE SET amount = excluded.amount, icon = excluded.icon`
-  ).run(req.user.id, category, amount, icon);
+    `INSERT INTO budgets (user_id, category, amount, icon, type) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, category) DO UPDATE SET amount = excluded.amount, icon = excluded.icon, type = excluded.type`
+  ).run(req.user.id, category, amount, icon, type);
   res.status(201).json(
     db.prepare("SELECT * FROM budgets WHERE user_id = ? AND category = ?").get(req.user.id, category)
   );

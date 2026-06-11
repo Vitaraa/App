@@ -1669,6 +1669,9 @@ select:focus {
 .budget-fill.over {
   background: var(--red);
 }
+.budget-fill.income {
+  background: var(--green);
+}
 .budget-spent {
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
