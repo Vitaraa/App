@@ -46,6 +46,21 @@ function parseConfig(p) {
   }
 }
 
+// How much of a job's income increase gets invested, from a slider position.
+//   pos 0  (left)   = Same — keep investing what you do today (0 of the raise)
+//   pos 0.5 (middle)= Proportional — keep your current savings rate on the raise
+//   pos 1  (right)  = All — invest the entire raise
+// In between is custom; the value is capped at `delta` (the raise itself).
+// `delta` is the monthly take-home increase; `savingsRate` is current savings/income.
+function investedExtra(pos, delta, savingsRate) {
+  if (!(delta > 0)) return delta; // a pay cut (or no raise) flows through in full
+  const p = Math.min(1, Math.max(0, Number(pos) ?? 0.5));
+  const r = Math.min(1, Math.max(0, Number(savingsRate) || 0));
+  const prop = r * delta; // the "proportional" amount, anchored at the middle
+  if (p <= 0.5) return (p / 0.5) * prop;
+  return prop + ((p - 0.5) / 0.5) * (delta - prop);
+}
+
 export default function ForesightTab({ txns = [] }) {
   const [plans, setPlans] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -56,6 +71,7 @@ export default function ForesightTab({ txns = [] }) {
   const [newOpen, setNewOpen] = useState(false);
   const [newKind, setNewKind] = useState("retirement");
   const [newName, setNewName] = useState("");
+  const [sliderPos, setSliderPos] = useState(0.5); // job raise-allocation slider
   const currentYear = new Date().getFullYear();
 
   async function load() {
@@ -136,6 +152,14 @@ export default function ForesightTab({ txns = [] }) {
   const cfg = parseConfig(plan);
   const retirementYear = plans.find((p) => p.kind === "retirement")?.target_year || null;
 
+  // Keep the job raise-allocation slider in sync with the plan being edited.
+  useEffect(() => {
+    if (editing && plan && plan.kind === "job") {
+      setSliderPos(Number(parseConfig(plan).invest_pos ?? 0.5));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, selectedId, plan?.kind]);
+
   function analyzeSavings(p) {
     const years = (p.target_year || currentYear) - currentYear;
     return {
@@ -162,13 +186,15 @@ export default function ForesightTab({ txns = [] }) {
             houses.push({ year: startY, price: amt, downPayment: p.down_payment, loanRate: p.loan_rate ?? 5.5, loanTerm: p.loan_term ?? 25, appreciation: p.return_rate ?? 3, name: p.name });
           break;
         case "job": {
-          // A job is your primary income. The entered salary is gross, so we
-          // estimate take-home after income tax, then what you invest is take-home
-          // minus planned monthly spending (from the Budget tab) — not the whole
-          // paycheck. Subtracting `surplus` cancels the base saving the sim already
-          // applies, so the net monthly saving lands at takeHome/12 − plannedExpense.
-          const takeHome = afterTaxIncome(amt);
-          flows.push({ start: startY, end: retirementYear || lifeYear, monthly: takeHome / 12 - plannedExpense - surplus });
+          // A job is your primary income. The entered salary is gross, so estimate
+          // monthly take-home after tax. The raise over your current income is
+          // `delta`; how much of it you invest is set by the plan's slider (Same /
+          // Proportional / All / custom). The sim already adds your base saving
+          // (`surplus`), so the job flow only adds the invested portion of the raise.
+          const delta = afterTaxIncome(amt) / 12 - monthlyIncome;
+          const savingsRate = monthlyIncome > 0 ? surplus / monthlyIncome : 1;
+          const extra = investedExtra(c.invest_pos ?? 0.5, delta, savingsRate);
+          flows.push({ start: startY, end: retirementYear || lifeYear, monthly: extra });
           break;
         }
         case "education": {
@@ -284,7 +310,7 @@ export default function ForesightTab({ txns = [] }) {
       retirement: { name: "Retirement", target_amount: 1000000, target_year: currentYear + 30, return_rate: 7, config: {} },
       house: { name: "Home", target_amount: 500000, target_year: currentYear + 5, return_rate: 3, down_payment: null, loan_rate: 5.5, loan_term: 25, config: {} },
       custom: { name: "Goal", target_amount: 50000, target_year: currentYear + 5, return_rate: 7, config: {} },
-      job: { name: "New job", target_amount: 80000, target_year: currentYear + 1, return_rate: 0, config: {} },
+      job: { name: "New job", target_amount: 80000, target_year: currentYear + 1, return_rate: 0, config: { invest_pos: 0.5 } },
       education: { name: "Education", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 4, school_income: Math.round(monthlyIncome * 12) } },
       kids: { name: "Child", target_amount: KIDS_DEFAULT, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 19 } },
       income: { name: "Extra income", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 1, one_time: true } },
@@ -407,9 +433,31 @@ export default function ForesightTab({ txns = [] }) {
                 )}
                 {k === "job" && (
                   <>
-                    <label className="field"><span>New income / yr</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
+                    <label className="field"><span>New income / yr (gross)</span><input type="number" defaultValue={plan.target_amount} key={fk("t")} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
                     <label className="field"><span>Start year</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
                     <div className="field"><span>Now</span><span className="muted nowval">{fmt(monthlyIncome * 12)}/yr current income</span></div>
+                    {(() => {
+                      const delta = afterTaxIncome(Number(plan.target_amount) || 0) / 12 - monthlyIncome;
+                      const rate = monthlyIncome > 0 ? Math.min(1, Math.max(0, surplus / monthlyIncome)) : 1;
+                      const extra = investedExtra(sliderPos, delta, rate);
+                      const persist = (e) => patchConfig("invest_pos", Number(e.target.value));
+                      return (
+                        <div className="field slider-field">
+                          <span>How much of the raise to invest</span>
+                          <input
+                            type="range" min="0" max="1" step="0.01" value={sliderPos}
+                            onChange={(e) => setSliderPos(Number(e.target.value))}
+                            onMouseUp={persist} onTouchEnd={persist} onKeyUp={persist}
+                          />
+                          <div className="slider-labels"><span>Same</span><span>Proportional</span><span>All</span></div>
+                          <span className="muted slider-readout">
+                            {delta > 0
+                              ? `Investing ${fmt(extra * 12)}/yr of your ${fmt(delta * 12)}/yr after-tax raise — the rest goes to spending.`
+                              : `This job's take-home is about the same or less than your current income, so there's no raise to allocate.`}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </>
                 )}
                 {k === "education" && (

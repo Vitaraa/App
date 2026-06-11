@@ -1739,6 +1739,29 @@ select:focus {
 .plan-delete {
   justify-content: flex-end;
 }
+.slider-field {
+  grid-column: 1 / -1;
+}
+.slider-field input[type="range"] {
+  width: 100%;
+  margin: 8px 0 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.slider-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.slider-labels span:nth-child(2) {
+  text-align: center;
+}
+.slider-readout {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
 .plan-modal {
   width: 100%;
   max-width: 640px;
