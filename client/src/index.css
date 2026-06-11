@@ -1840,6 +1840,13 @@ select:focus {
   flex-shrink: 0;
   transform: translateY(1px);
 }
+.legend-ico {
+  flex-shrink: 0;
+  width: 1.25em;
+  text-align: center;
+  font-size: 0.95em;
+  line-height: 1;
+}
 .about-you {
   margin-top: 12px;
   padding-top: 12px;

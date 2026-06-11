@@ -17,6 +17,19 @@ import { simulateNetWorth, mortgagePayment, afterTaxIncome, toTodaysDollars } fr
 
 const INFLATION = 0.025; // annual rate used to show projections in today's dollars
 
+// Small emoji icon per plan type, used in the legend.
+const PLAN_ICONS = {
+  retirement: "🏖️",
+  house: "🏠",
+  job: "💼",
+  education: "🎓",
+  kids: "👶",
+  income: "💵",
+  expense: "💸",
+  pension: "🏦",
+};
+const planIcon = (kind) => PLAN_ICONS[kind] || "📍";
+
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const fmtc = (n) =>
@@ -246,7 +259,7 @@ export default function ForesightTab({ txns = [] }) {
         const v = valueAt(ry);
         const lasts = !data.some((d) => d.year > ry && d.NetWorth < 0);
         const status = `retire ${ry} with ${fmt(v)} saved, then ${fmt(retireSpending)}/mo` + (lasts ? ` — lasts through ${lifeYear}` : "");
-        return { id: p.id, name: p.name, x: ry, y: v, color: lasts ? "var(--green)" : "var(--red)", status };
+        return { id: p.id, name: p.name, kind: p.kind, x: ry, y: v, color: lasts ? "var(--green)" : "var(--red)", status };
       }
       let status;
       if (p.kind === "house") status = `buy ${fmt(amt)} home in ${startY}`;
@@ -257,7 +270,7 @@ export default function ForesightTab({ txns = [] }) {
       else if (p.kind === "expense") status = c.one_time ? `expense ${fmt(amt)} in ${startY}` : `expense ${fmt(amt)}/yr ${startY}–${endY}`;
       else if (p.kind === "pension") status = `${c.pension_type || "Pension"} ${fmt(amt)}/yr from ${startY}`;
       else status = "";
-      return { id: p.id, name: p.name, x: startY, y: valueAt(startY), color: "var(--accent)", status };
+      return { id: p.id, name: p.name, kind: p.kind, x: startY, y: valueAt(startY), color: "var(--accent)", status };
     });
     // "Running out of money" only means depleting savings in retirement — so only
     // flag a negative balance in a year AFTER the retirement year. A negative
@@ -517,21 +530,22 @@ export default function ForesightTab({ txns = [] }) {
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="year" type="number" domain={[currentYear, chart.xMax]} allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
                     <YAxis tickLine={false} axisLine={false} width={64} fontSize={12} tickFormatter={fmt} />
-                    <Tooltip formatter={(v) => fmtc(v)} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} />
+                    {/* Tooltip kept (so the chart still reports the hovered year for dragging) but rendered invisibly — no bubble, no cursor line. */}
+                    <Tooltip cursor={false} content={() => null} />
                     <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
-                    <Line type="monotone" dataKey="NetWorth" stroke="url(#nwGradient)" strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="NetWorth" stroke="url(#nwGradient)" strokeWidth={2.5} dot={false} activeDot={false} isAnimationActive={false} />
                     {chart.markers.map((m) => (
-                      <ReferenceDot key={m.id} x={m.x} y={m.y} r={drag && drag.id === m.id ? 8 : 6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" onMouseDown={() => startDrag(m.id, m.x)} style={{ cursor: "ew-resize" }} />
+                      <ReferenceDot key={m.id} x={m.x} y={m.y} r={drag && drag.id === m.id ? 8 : 6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" isAnimationActive={false} onMouseDown={() => startDrag(m.id, m.x)} style={{ cursor: "ew-resize" }} />
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
               )}
               <ul className="foresight-legend">
-                {chart.markers.map((m) => (
-                  <li key={m.id} className="legend-clickable" onClick={() => openEdit(m.id)} title="Edit plan"><span className="legend-dot" style={{ background: m.color }} /><strong>{m.name}</strong><span className="muted"> — {m.status}</span></li>
+                {[...chart.markers].sort((a, b) => a.x - b.x).map((m) => (
+                  <li key={m.id} className="legend-clickable" onClick={() => openEdit(m.id)} title="Edit plan"><span className="legend-ico" aria-hidden="true">{planIcon(m.kind)}</span><strong>{m.name}</strong><span className="muted"> — {m.status}</span></li>
                 ))}
                 {chart.ro && (
-                  <li><span className="legend-dot" style={{ background: "var(--red)" }} /><span className="neg">Savings run out in {chart.ro}</span><span className="muted"> — after retirement, spending draws the balance below zero.</span></li>
+                  <li><span className="legend-ico" aria-hidden="true">⚠️</span><span className="neg">Savings run out in {chart.ro}</span><span className="muted"> — after retirement, spending draws the balance below zero.</span></li>
                 )}
               </ul>
             </section>
