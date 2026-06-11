@@ -87,3 +87,41 @@ export function analyzePlan({ start, target, rate, years, contribution, monthlyI
 export function compoundedSaving(monthlySaving, annualRatePct, years) {
   return round2(futureValue(0, monthlySaving, annualRatePct, years));
 }
+
+// The first calendar year the accumulating balance reaches `target` (or null if
+// it never does within `horizonYears`). Used to place a goal marker on the line
+// at the year it's actually achieved — earlier than the deadline if ahead.
+export function crossingYear(start, monthly, annualRatePct, startYear, target, horizonYears) {
+  for (let y = 0; y <= horizonYears; y++) {
+    if (futureValue(start, monthly, annualRatePct, y) >= target) return startYear + y;
+  }
+  return null;
+}
+
+// Whole-life balance, year by year: accumulate (with monthly contributions)
+// until `retirementYear`, then draw down `retirementSpending` per month until
+// `lifeYear`. Balance can go negative (running out of money / into debt).
+// Returns [{ year, value }].
+export function lifeProjection({ start, monthly, rate, startYear, retirementYear, lifeYear, retirementSpending }) {
+  const r = (Number(rate) || 0) / 100 / 12;
+  const draw = Number(retirementSpending) || 0;
+  const pmt = Number(monthly) || 0;
+  let bal = Number(start) || 0;
+  const end = Math.max(startYear + 1, Number(lifeYear) || startYear, Number(retirementYear) || startYear);
+  const out = [{ year: startYear, value: round2(bal) }];
+  for (let y = startYear + 1; y <= end; y++) {
+    for (let m = 0; m < 12; m++) {
+      bal = bal * (1 + r);
+      if (retirementYear && y > retirementYear) bal -= draw;
+      else bal += pmt;
+    }
+    out.push({ year: y, value: round2(bal) });
+  }
+  return out;
+}
+
+// First year the series dips below zero (runs out of money), or null.
+export function runsOutYear(series) {
+  const hit = (series || []).find((p) => p.value < 0);
+  return hit ? hit.year : null;
+}
