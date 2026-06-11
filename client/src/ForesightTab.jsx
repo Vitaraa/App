@@ -277,6 +277,13 @@ export default function ForesightTab({ txns = [] }) {
     setSelectedId(null);
     load();
   }
+  function openEdit(id) {
+    setSelectedId(id);
+    setEditing(true);
+  }
+  function closeEdit() {
+    setEditing(false);
+  }
 
   const monthlyPlan = sel ? (sel.status === "on-track" || sel.status === "reached" ? surplus : sel.required) : 0;
   const k = plan ? plan.kind : null;
@@ -285,11 +292,6 @@ export default function ForesightTab({ txns = [] }) {
   return (
     <div className="foresight-tab">
       <PageActions>
-        {plan && (
-          <button className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
-            {editing ? "Done" : "Edit plan"}
-          </button>
-        )}
         <button className="btn primary sm" onClick={newPlan}>+ New plan</button>
       </PageActions>
 
@@ -299,18 +301,13 @@ export default function ForesightTab({ txns = [] }) {
         </section>
       ) : (
         <>
-          {plans.length > 1 && (
-            <div className="plan-tabs">
-              {plans.map((p) => (
-                <button key={p.id} className={`chip ${plan && p.id === plan.id ? "chip-on" : ""}`} onClick={() => setSelectedId(p.id)}>
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          )}
-
           {editing && plan && (
-            <section className="card">
+            <div className="modal-overlay" onClick={closeEdit}>
+            <section className="card plan-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <span className="modal-title">Edit plan</span>
+                <button className="modal-close" onClick={closeEdit} aria-label="Close">×</button>
+              </div>
               <div className="plan-grid">
                 <label className="field"><span>Name</span><input defaultValue={plan.name} key={fk("n")} onBlur={(e) => patch("name", e.target.value)} /></label>
                 <label className="field"><span>Type</span><select value={plan.kind} onChange={(e) => changeKind(e.target.value)}>{KINDS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label>
@@ -370,7 +367,6 @@ export default function ForesightTab({ txns = [] }) {
                   </>
                 )}
 
-                <div className="field plan-delete"><span>&nbsp;</span><button className="btn ghost sm" onClick={remove}>Delete plan</button></div>
               </div>
               <div className="plan-grid about-you">
                 <label className="field"><span>Your age</span><input type="number" defaultValue={settings.fs_age ?? ""} placeholder="30" key={fk("age")} onBlur={(e) => saveSetting("fs_age", e.target.value)} /></label>
@@ -378,7 +374,11 @@ export default function ForesightTab({ txns = [] }) {
                 <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={fk("sp")} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
                 <label className="field"><span>Current rent/mortgage / mo</span><input type="number" defaultValue={settings.fs_housing ?? ""} placeholder="0" key={fk("ho")} onBlur={(e) => saveSetting("fs_housing", e.target.value)} /></label>
               </div>
+              <div className="plan-modal-footer">
+                <button className="btn danger sm" onClick={remove}>Delete plan</button>
+              </div>
             </section>
+            </div>
           )}
 
           {chart && (
@@ -401,14 +401,14 @@ export default function ForesightTab({ txns = [] }) {
                     <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
                     <Line type="monotone" dataKey="NetWorth" stroke={chart.lineColor} strokeWidth={2.5} dot={false} />
                     {chart.markers.map((m) => (
-                      <ReferenceDot key={m.id} x={m.x} y={m.y} r={6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" />
+                      <ReferenceDot key={m.id} x={m.x} y={m.y} r={6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" onClick={() => openEdit(m.id)} style={{ cursor: "pointer" }} />
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
               )}
               <ul className="foresight-legend">
                 {chart.markers.map((m) => (
-                  <li key={m.id}><span className="legend-dot" style={{ background: m.color }} /><strong>{m.name}</strong><span className="muted"> — {m.status}</span></li>
+                  <li key={m.id} className="legend-clickable" onClick={() => openEdit(m.id)} title="Edit plan"><span className="legend-dot" style={{ background: m.color }} /><strong>{m.name}</strong><span className="muted"> — {m.status}</span></li>
                 ))}
                 {chart.ro && (
                   <li><span className="legend-dot" style={{ background: "var(--red)" }} /><span className="neg">Runs out of money in {chart.ro}</span><span className="muted"> — spending outpaces savings in retirement.</span></li>
