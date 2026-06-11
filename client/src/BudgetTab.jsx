@@ -186,10 +186,8 @@ export default function BudgetTab({ txns }) {
             style={{ width: `${Math.min(100, pct)}%` }}
           />
         </div>
-        <span className={`budget-spent ${over ? "neg" : "muted"}`}>
-          {fmt(actual)}{eff > 0 ? ` / ${fmt(eff)}` : ""}
-        </span>
-        <span className="budget-limit-edit">
+        <span className="budget-amount">
+          <span className={`budget-spent ${over ? "neg" : "muted"}`}>{fmt(actual)} /</span>
           <input
             type="number"
             step="0.01"
@@ -222,10 +220,13 @@ export default function BudgetTab({ txns }) {
       </section>
 
       <section className="card">
-        <div className="widget-head">
-          <p className="muted budget-hint">
-            Expected monthly income by source. Bars reflect income received this month.
-          </p>
+        <div className="widget-head budget-section-head">
+          <div>
+            <h3 className="budget-section-title">Income</h3>
+            <p className="muted budget-hint">
+              Expected monthly income by source. Bars reflect income received this month.
+            </p>
+          </div>
           <button className="link" onClick={() => toggleAdd("income")}>
             {adding === "income" ? "Cancel" : "+ Add income"}
           </button>
@@ -240,14 +241,15 @@ export default function BudgetTab({ txns }) {
             {incomeBudgets.map((b) => renderRow(b, "income"))}
           </ul>
         )}
-      </section>
 
-      <section className="card">
-        <div className="widget-head">
-          <p className="muted budget-hint">
-            Monthly limits per category{rollover ? " · rollover on (last month's leftover carries over)" : ""}.
-            Bars reflect this month's spending.
-          </p>
+        <div className="widget-head budget-section-head budget-section-divider">
+          <div>
+            <h3 className="budget-section-title">Expenses</h3>
+            <p className="muted budget-hint">
+              Monthly limits per category{rollover ? " · rollover on (last month's leftover carries over)" : ""}.
+              Bars reflect this month's spending.
+            </p>
+          </div>
           <button className="link" onClick={() => toggleAdd("expense")}>
             {adding === "expense" ? "Cancel" : "+ Add category"}
           </button>

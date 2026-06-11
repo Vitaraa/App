@@ -1631,7 +1631,7 @@ select:focus {
 }
 .budget-row {
   display: grid;
-  grid-template-columns: 170px 1fr auto 100px 24px;
+  grid-template-columns: 170px 1fr 190px 24px;
   align-items: center;
   gap: 12px;
 }
@@ -1675,16 +1675,37 @@ select:focus {
 .budget-fill.income {
   background: var(--green);
 }
+.budget-amount {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
 .budget-spent {
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.budget-limit-edit input {
+.budget-amount input {
   margin-top: 0;
+  width: 90px;
+  flex: 0 0 90px;
   padding: 6px 8px;
   font-size: 0.82rem;
   text-align: right;
+}
+.budget-section-head {
+  align-items: flex-start;
+}
+.budget-section-title {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  font-weight: 700;
+}
+.budget-section-divider {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
 }
 
 .cashflow-tab,
@@ -2059,6 +2080,14 @@ thead .bt-row-head {
     top: calc(100% + 6px);
   }
   .budget-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "cat x"
+      "bar bar"
+      "amount amount";
   }
+  .budget-cat { grid-area: cat; }
+  .budget-bar { grid-area: bar; }
+  .budget-amount { grid-area: amount; justify-content: flex-start; }
+  .budget-row > .x { grid-area: x; }
 }
