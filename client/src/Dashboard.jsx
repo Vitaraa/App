@@ -29,15 +29,27 @@ export default function Dashboard() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem("claud_theme") || "dark");
   const [rollover, setRollover] = useState(false);
+  const [planning, setPlanning] = useState({ fs_age: "", fs_life: "", fs_housing: "" });
   const menuRef = useRef(null);
 
   useEffect(() => {
-    api.getSettings().then((s) => setRollover(s.budget_rollover === "1")).catch(() => {});
+    api.getSettings().then((s) => {
+      setRollover(s.budget_rollover === "1");
+      setPlanning({ fs_age: s.fs_age ?? "", fs_life: s.fs_life ?? "", fs_housing: s.fs_housing ?? "" });
+    }).catch(() => {});
   }, []);
   async function toggleRollover(on) {
     setRollover(on);
     try {
       await api.setSetting("budget_rollover", on ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }
+  async function savePlanning(key, value) {
+    setPlanning((p) => ({ ...p, [key]: value }));
+    try {
+      await api.setSetting(key, value);
     } catch {
       /* ignore */
     }
@@ -173,6 +185,27 @@ export default function Dashboard() {
                 <button className={`seg-btn ${rollover ? "seg-on" : ""}`} onClick={() => toggleRollover(true)}>On</button>
                 <button className={`seg-btn ${!rollover ? "seg-on" : ""}`} onClick={() => toggleRollover(false)}>Off</button>
               </div>
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>Your age</strong>
+                <p className="muted">Used by Foresight to project your timeline.</p>
+              </div>
+              <input className="setting-input" type="number" value={planning.fs_age} placeholder="30" onChange={(e) => savePlanning("fs_age", e.target.value)} />
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>Life expectancy (age)</strong>
+                <p className="muted">How far out Foresight projects your net worth.</p>
+              </div>
+              <input className="setting-input" type="number" value={planning.fs_life} placeholder="90" onChange={(e) => savePlanning("fs_life", e.target.value)} />
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>Current rent / mortgage (mo)</strong>
+                <p className="muted">Your monthly housing cost, used in Foresight projections.</p>
+              </div>
+              <input className="setting-input" type="number" value={planning.fs_housing} placeholder="0" onChange={(e) => savePlanning("fs_housing", e.target.value)} />
             </div>
             <div className="setting-row">
               <div>

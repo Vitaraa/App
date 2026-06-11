@@ -50,6 +50,9 @@ export default function ForesightTab({ txns = [] }) {
   const [settings, setSettings] = useState({});
   const [selectedId, setSelectedId] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newKind, setNewKind] = useState("retirement");
+  const [newName, setNewName] = useState("");
   const currentYear = new Date().getFullYear();
 
   async function load() {
@@ -235,10 +238,31 @@ export default function ForesightTab({ txns = [] }) {
       .map((c) => ({ cat: c.cat, monthly: c.monthly, saving: c.monthly * 0.25, grows: compoundedSaving(c.monthly * 0.25, plan.return_rate, sel.years) }));
   }, [catMonthly, sel, plan]);
 
-  async function newPlan() {
-    const p = await api.addPlan({ name: "Retirement", kind: "retirement", target_amount: 1000000, target_year: currentYear + 30, return_rate: 7 });
+  // Sensible defaults for each plan type — shared by "New plan" and type-switch.
+  const planDefaults = (kind) =>
+    ({
+      retirement: { name: "Retirement", target_amount: 1000000, target_year: currentYear + 30, return_rate: 7, config: {} },
+      house: { name: "Home", target_amount: 500000, target_year: currentYear + 5, return_rate: 3, down_payment: null, loan_rate: 5.5, loan_term: 25, config: {} },
+      custom: { name: "Goal", target_amount: 50000, target_year: currentYear + 5, return_rate: 7, config: {} },
+      job: { name: "New job", target_amount: 80000, target_year: currentYear + 1, return_rate: 0, config: {} },
+      education: { name: "Education", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 4, school_income: Math.round(monthlyIncome * 12) } },
+      kids: { name: "Child", target_amount: KIDS_DEFAULT, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 19 } },
+      income: { name: "Extra income", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 1, one_time: true } },
+      expense: { name: "One-off expense", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 1, one_time: true } },
+      pension: { name: "Pension", target_amount: 15000, target_year: currentYear + 30, return_rate: 0, config: { pension_type: "CPP" } },
+    }[kind] || {});
+
+  function openNew() {
+    setNewKind("retirement");
+    setNewName("");
+    setNewOpen(true);
+  }
+  async function createPlan() {
+    const d = planDefaults(newKind);
+    const name = (newName && newName.trim()) || d.name || "Plan";
+    const p = await api.addPlan({ kind: newKind, ...d, name });
+    setNewOpen(false);
     setSelectedId(p.id);
-    setEditing(true);
     load();
   }
   async function patch(field, value) {
@@ -252,18 +276,7 @@ export default function ForesightTab({ txns = [] }) {
   // Switching plan type resets to sensible defaults for that type.
   async function changeKind(kind) {
     if (!plan) return;
-    const d = {
-      retirement: { name: "Retirement", target_amount: 1000000, target_year: currentYear + 30, return_rate: 7, config: {} },
-      house: { name: "Home", target_amount: 500000, target_year: currentYear + 5, return_rate: 3, down_payment: null, loan_rate: 5.5, loan_term: 25, config: {} },
-      custom: { name: "Goal", target_amount: 50000, target_year: currentYear + 5, return_rate: 7, config: {} },
-      job: { name: "New job", target_amount: 80000, target_year: currentYear + 1, return_rate: 0, config: {} },
-      education: { name: "Education", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 4, school_income: Math.round(monthlyIncome * 12) } },
-      kids: { name: "Child", target_amount: KIDS_DEFAULT, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 19 } },
-      income: { name: "Extra income", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 1, one_time: true } },
-      expense: { name: "One-off expense", target_amount: 10000, target_year: currentYear + 1, return_rate: 0, config: { end_year: currentYear + 1, one_time: true } },
-      pension: { name: "Pension", target_amount: 15000, target_year: currentYear + 30, return_rate: 0, config: { pension_type: "CPP" } },
-    }[kind] || {};
-    await api.updatePlan(plan.id, { kind, ...d });
+    await api.updatePlan(plan.id, { kind, ...planDefaults(kind) });
     load();
   }
   async function saveSetting(key, value) {
@@ -292,8 +305,28 @@ export default function ForesightTab({ txns = [] }) {
   return (
     <div className="foresight-tab">
       <PageActions>
-        <button className="btn primary sm" onClick={newPlan}>+ New plan</button>
+        <button className="btn primary sm" onClick={openNew}>+ New plan</button>
       </PageActions>
+
+      {newOpen && (
+        <div className="modal-overlay" onClick={() => setNewOpen(false)}>
+          <section className="card plan-modal new-plan-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span className="modal-title">New plan</span>
+              <button className="modal-close" onClick={() => setNewOpen(false)} aria-label="Close">×</button>
+            </div>
+            <div className="plan-grid">
+              <label className="field"><span>Type</span><select value={newKind} onChange={(e) => setNewKind(e.target.value)}>{KINDS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></label>
+              <label className="field"><span>Name</span><input value={newName} placeholder={planDefaults(newKind).name || ""} onChange={(e) => setNewName(e.target.value)} /></label>
+            </div>
+            <p className="muted new-plan-hint">A plan is created with sensible defaults — click its dot or name on the graph to fine-tune the amounts.</p>
+            <div className="plan-modal-footer">
+              <button className="btn ghost sm" onClick={() => setNewOpen(false)}>Cancel</button>
+              <button className="btn primary sm" onClick={createPlan}>Create plan</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {plans.length === 0 ? (
         <section className="card">
@@ -318,6 +351,9 @@ export default function ForesightTab({ txns = [] }) {
                     <label className="field"><span>Target year</span><input type="number" defaultValue={plan.target_year || ""} key={fk("y")} onBlur={(e) => patch("target_year", e.target.value)} /></label>
                     <label className="field"><span>Investment return % / yr</span><input type="number" step="0.1" defaultValue={plan.return_rate} key={fk("r")} onBlur={(e) => patch("return_rate", e.target.value)} /></label>
                   </>
+                )}
+                {k === "retirement" && (
+                  <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={fk("sp")} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
                 )}
                 {k === "house" && (
                   <>
@@ -367,12 +403,6 @@ export default function ForesightTab({ txns = [] }) {
                   </>
                 )}
 
-              </div>
-              <div className="plan-grid about-you">
-                <label className="field"><span>Your age</span><input type="number" defaultValue={settings.fs_age ?? ""} placeholder="30" key={fk("age")} onBlur={(e) => saveSetting("fs_age", e.target.value)} /></label>
-                <label className="field"><span>Life expectancy (age)</span><input type="number" defaultValue={settings.fs_life ?? ""} placeholder="90" key={fk("life")} onBlur={(e) => saveSetting("fs_life", e.target.value)} /></label>
-                <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={fk("sp")} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
-                <label className="field"><span>Current rent/mortgage / mo</span><input type="number" defaultValue={settings.fs_housing ?? ""} placeholder="0" key={fk("ho")} onBlur={(e) => saveSetting("fs_housing", e.target.value)} /></label>
               </div>
               <div className="plan-modal-footer">
                 <button className="btn danger sm" onClick={remove}>Delete plan</button>
