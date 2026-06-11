@@ -125,3 +125,69 @@ export function runsOutYear(series) {
   const hit = (series || []).find((p) => p.value < 0);
   return hit ? hit.year : null;
 }
+
+// Amortized monthly mortgage payment.
+export function mortgagePayment(principal, annualRatePct, termYears) {
+  const P = Number(principal) || 0;
+  const r = (Number(annualRatePct) || 0) / 100 / 12;
+  const n = Math.max(1, Math.round((Number(termYears) || 25) * 12));
+  if (r === 0) return P / n;
+  return (P * r) / (1 - Math.pow(1 + r, -n));
+}
+
+// One combined net-worth path covering ALL plans, month by month.
+//   - liquid (investable) assets grow at `investReturn` and receive `surplus`.
+//   - retirement: stop saving after retirementYear and draw down retirementSpending.
+//   - each house: at its year, spend the down payment, take on a mortgage (debt
+//     that amortizes), the home appreciates, and the mortgage payment REPLACES
+//     the current housing cost (rent or prior mortgage) in the monthly cash flow.
+// Net worth = liquid + sum(home value − mortgage balance). Returns { series, events }.
+export function simulateNetWorth(o) {
+  const rInv = (Number(o.investReturn) || 0) / 100 / 12;
+  let liquid = Number(o.startNetWorth) || 0;
+  let contribution = Number(o.surplus) || 0;
+  let housingCost = Number(o.currentHousing) || 0;
+  const homes = [];
+  const byYear = {};
+  for (const h of o.houses || []) (byYear[h.year] ||= []).push(h);
+
+  const end = Math.max(o.currentYear + 1, Number(o.lifeYear) || o.currentYear);
+  const series = [{ year: o.currentYear, value: round2(liquid) }];
+  const events = [];
+
+  for (let y = o.currentYear + 1; y <= end; y++) {
+    // Execute any home purchases at the start of the year.
+    for (const h of byYear[y] || []) {
+      const price = Number(h.price) || 0;
+      const down = h.downPayment != null && h.downPayment !== "" ? Number(h.downPayment) : price * 0.2;
+      liquid -= down;
+      const bal = Math.max(0, price - down);
+      const pay = mortgagePayment(bal, h.loanRate ?? 5.5, h.loanTerm ?? 25);
+      homes.push({
+        value: price,
+        mortgage: bal,
+        payment: pay,
+        rate: (Number(h.loanRate ?? 5.5)) / 100,
+        apprM: (Number(h.appreciation ?? 3)) / 100 / 12,
+      });
+      contribution -= pay - housingCost; // mortgage now replaces the housing cost
+      housingCost = pay;
+      events.push({ year: y, name: h.name, type: "house" });
+    }
+    for (let m = 0; m < 12; m++) {
+      liquid = liquid * (1 + rInv);
+      if (o.retirementYear && y > o.retirementYear) liquid -= Number(o.retirementSpending) || 0;
+      else liquid += contribution;
+      for (const h of homes) {
+        h.value = h.value * (1 + h.apprM);
+        const interest = h.mortgage * (h.rate / 12);
+        const principal = Math.min(h.mortgage, Math.max(0, h.payment - interest));
+        h.mortgage = Math.max(0, h.mortgage - principal);
+      }
+    }
+    const equity = homes.reduce((s, h) => s + (h.value - h.mortgage), 0);
+    series.push({ year: y, value: round2(liquid + equity) });
+  }
+  if (o.retirementYear) events.push({ year: o.retirementYear, name: "Retirement", type: "retirement" });
+  return { series, events };
+}

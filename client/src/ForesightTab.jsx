@@ -13,7 +13,7 @@ import {
 import { api } from "./api.js";
 import PageActions from "./PageActions.jsx";
 import { accountGroup, kindForGroup } from "./institutions.js";
-import { analyzePlan, lifeProjection, runsOutYear, compoundedSaving } from "./foresight.js";
+import { analyzePlan, simulateNetWorth, runsOutYear, mortgagePayment, compoundedSaving } from "./foresight.js";
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -85,60 +85,70 @@ export default function ForesightTab({ txns = [] }) {
       .sort((a, b) => b.monthly - a.monthly);
   }, [txns]);
 
-  // "About you" inputs (user-level, stored in settings).
   const age = Number(settings.fs_age) || 30;
   const lifeExp = Number(settings.fs_life) || 90;
-  const retireSpending = settings.fs_spend != null && settings.fs_spend !== ""
-    ? Number(settings.fs_spend)
-    : Math.round(monthlyExpense) || 4000;
+  const retireSpending =
+    settings.fs_spend != null && settings.fs_spend !== "" ? Number(settings.fs_spend) : Math.round(monthlyExpense) || 4000;
+  const currentHousing = settings.fs_housing != null && settings.fs_housing !== "" ? Number(settings.fs_housing) : 0;
   const lifeYear = currentYear + Math.max(1, lifeExp - age);
 
   const plan = plans.find((p) => p.id === selectedId) || plans[0] || null;
 
-  function analyzeOf(p) {
-    const start = p.start_amount != null ? p.start_amount : netWorth;
-    const contribution = p.monthly_contribution != null ? p.monthly_contribution : surplus;
+  function analyzeSavings(p) {
     const years = (p.target_year || currentYear) - currentYear;
     return {
-      ...analyzePlan({ start, target: p.target_amount, rate: p.return_rate, years, contribution, monthlyIncome }),
-      start,
-      contribution,
+      ...analyzePlan({ start: netWorth, target: p.target_amount, rate: p.return_rate, years, contribution: surplus, monthlyIncome }),
       years,
     };
   }
-  const sel = plan ? analyzeOf(plan) : null;
+  const sel = plan && plan.kind !== "house" ? analyzeSavings(plan) : null;
 
-  // Whole-life balance line for the selected plan (accumulate, then draw down
-  // after retirement), with each plan placed as a marker ON the line.
+  // One combined net-worth path reflecting ALL plans.
   const chart = useMemo(() => {
-    if (!plan || !sel) return null;
+    if (!plans.length) return null;
+    const retirementPlan = plans.find((p) => p.kind === "retirement");
+    const investReturn = plans.find((p) => p.kind !== "house")?.return_rate ?? 7;
+    const houses = plans
+      .filter((p) => p.kind === "house" && p.target_year > currentYear)
+      .map((p) => ({
+        year: p.target_year,
+        price: p.target_amount,
+        downPayment: p.down_payment,
+        loanRate: p.loan_rate ?? 5.5,
+        loanTerm: p.loan_term ?? 25,
+        appreciation: p.return_rate ?? 3,
+        name: p.name,
+      }));
     const xMax = Math.max(lifeYear, currentYear + 1, ...plans.map((p) => p.target_year || 0));
-    const retirementYear = plan.kind === "retirement" ? plan.target_year : null;
-    const series = lifeProjection({
-      start: sel.start,
-      monthly: sel.contribution,
-      rate: plan.return_rate,
-      startYear: currentYear,
-      retirementYear,
+    const { series } = simulateNetWorth({
+      startNetWorth: netWorth,
+      surplus,
+      investReturn,
+      currentYear,
       lifeYear: xMax,
+      retirementYear: retirementPlan ? retirementPlan.target_year : null,
       retirementSpending: retireSpending,
-    }).map((p) => ({ year: p.year, Projected: p.value }));
-
+      currentHousing,
+      houses,
+    });
+    const data = series.map((p) => ({ year: p.year, NetWorth: p.value }));
     const valueAt = (yr) => {
-      let v = series[0] ? series[0].Projected : 0;
-      for (const p of series) {
-        if (p.year <= yr) v = p.Projected;
+      let v = data[0] ? data[0].NetWorth : 0;
+      for (const p of data) {
+        if (p.year <= yr) v = p.NetWorth;
         else break;
       }
       return v;
     };
     const crossing = (target) => {
-      for (const p of series) if (p.Projected >= target) return p.year;
+      for (const p of data) if (p.NetWorth >= target) return p.year;
       return null;
     };
-
     const markers = plans.map((p) => {
       const deadline = p.target_year || currentYear;
+      if (p.kind === "house") {
+        return { id: p.id, name: p.name, x: deadline, y: valueAt(deadline), color: "var(--accent)", status: `buy ${fmt(p.target_amount)} home in ${deadline}` };
+      }
       const cross = crossing(p.target_amount);
       if (cross != null && cross <= deadline) {
         return { id: p.id, name: p.name, x: cross, y: p.target_amount, color: "var(--green)", status: `on track — reaches ${fmt(p.target_amount)} in ${cross}` };
@@ -149,12 +159,18 @@ export default function ForesightTab({ txns = [] }) {
       }
       return { id: p.id, name: p.name, x: deadline, y: v, color: "var(--red)", status: `${fmt(Math.max(0, p.target_amount - v))} short by ${deadline}` };
     });
+    const ro = runsOutYear(series);
+    const lineColor = ro ? "var(--red)" : "var(--green)";
+    return { data, markers, xMax, ro, lineColor, latest: data[data.length - 1]?.NetWorth || 0 };
+  }, [plans, netWorth, surplus, currentYear, lifeYear, retireSpending, currentHousing]);
 
-    const ro = runsOutYear(series.map((p) => ({ year: p.year, value: p.Projected })));
-    const selMarker = markers.find((m) => m.id === plan.id);
-    const lineColor = ro ? "var(--red)" : selMarker ? selMarker.color : "var(--accent)";
-    return { series, markers, xMax, ro, lineColor };
-  }, [plan, sel, plans, currentYear, lifeYear, retireSpending, netWorth, surplus, monthlyIncome]);
+  const houseInfo = useMemo(() => {
+    if (!plan || plan.kind !== "house") return null;
+    const price = plan.target_amount || 0;
+    const down = plan.down_payment != null ? plan.down_payment : price * 0.2;
+    const pay = mortgagePayment(Math.max(0, price - down), plan.loan_rate ?? 5.5, plan.loan_term ?? 25);
+    return { down, pay, delta: pay - currentHousing };
+  }, [plan, currentHousing]);
 
   const recs = useMemo(() => {
     if (!sel || sel.years <= 0) return [];
@@ -190,7 +206,8 @@ export default function ForesightTab({ txns = [] }) {
     load();
   }
 
-  const monthlyPlan = sel ? (sel.status === "on-track" || sel.status === "reached" ? sel.contribution : sel.required) : 0;
+  const monthlyPlan = sel ? (sel.status === "on-track" || sel.status === "reached" ? surplus : sel.required) : 0;
+  const isHouse = plan && plan.kind === "house";
 
   return (
     <div className="foresight-tab">
@@ -205,7 +222,7 @@ export default function ForesightTab({ txns = [] }) {
 
       {plans.length === 0 ? (
         <section className="card">
-          <p className="muted">No plans yet — add one to project a long-term goal.</p>
+          <p className="muted">No plans yet — add one to project how a goal shapes your net worth over your life.</p>
         </section>
       ) : (
         <>
@@ -224,94 +241,115 @@ export default function ForesightTab({ txns = [] }) {
               <div className="plan-grid">
                 <label className="field"><span>Goal name</span><input defaultValue={plan.name} key={`n${plan.id}`} onBlur={(e) => patch("name", e.target.value)} /></label>
                 <label className="field"><span>Type</span><select value={plan.kind} onChange={(e) => patch("kind", e.target.value)}>{KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></label>
-                <label className="field"><span>Target amount</span><input type="number" defaultValue={plan.target_amount} key={`t${plan.id}`} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
-                <label className="field"><span>Target year</span><input type="number" defaultValue={plan.target_year || ""} key={`y${plan.id}`} onBlur={(e) => patch("target_year", e.target.value)} /></label>
-                <label className="field"><span>Expected return % / yr</span><input type="number" step="0.1" defaultValue={plan.return_rate} key={`r${plan.id}`} onBlur={(e) => patch("return_rate", e.target.value)} /></label>
-                <label className="field"><span>Starting amount</span><input type="number" defaultValue={plan.start_amount ?? ""} placeholder={`Net worth ${fmt(netWorth)}`} key={`s${plan.id}`} onBlur={(e) => patch("start_amount", e.target.value)} /></label>
-                <label className="field"><span>Monthly contribution</span><input type="number" defaultValue={plan.monthly_contribution ?? ""} placeholder={`Surplus ${fmt(surplus)}`} key={`c${plan.id}`} onBlur={(e) => patch("monthly_contribution", e.target.value)} /></label>
+                <label className="field"><span>{isHouse ? "Home price" : "Target amount"}</span><input type="number" defaultValue={plan.target_amount} key={`t${plan.id}`} onBlur={(e) => patch("target_amount", e.target.value)} /></label>
+                <label className="field"><span>{isHouse ? "Purchase year" : "Target year"}</span><input type="number" defaultValue={plan.target_year || ""} key={`y${plan.id}`} onBlur={(e) => patch("target_year", e.target.value)} /></label>
+                {isHouse ? (
+                  <>
+                    <label className="field"><span>Down payment</span><input type="number" defaultValue={plan.down_payment ?? ""} placeholder={`20% (${fmt((plan.target_amount || 0) * 0.2)})`} key={`d${plan.id}`} onBlur={(e) => patch("down_payment", e.target.value)} /></label>
+                    <label className="field"><span>Mortgage rate %</span><input type="number" step="0.1" defaultValue={plan.loan_rate ?? ""} placeholder="5.5" key={`lr${plan.id}`} onBlur={(e) => patch("loan_rate", e.target.value)} /></label>
+                    <label className="field"><span>Mortgage term (yrs)</span><input type="number" defaultValue={plan.loan_term ?? ""} placeholder="25" key={`lt${plan.id}`} onBlur={(e) => patch("loan_term", e.target.value)} /></label>
+                    <label className="field"><span>Appreciation % / yr</span><input type="number" step="0.1" defaultValue={plan.return_rate} key={`r${plan.id}`} onBlur={(e) => patch("return_rate", e.target.value)} /></label>
+                  </>
+                ) : (
+                  <label className="field"><span>Investment return % / yr</span><input type="number" step="0.1" defaultValue={plan.return_rate} key={`r${plan.id}`} onBlur={(e) => patch("return_rate", e.target.value)} /></label>
+                )}
                 <div className="field plan-delete"><span>&nbsp;</span><button className="btn ghost sm" onClick={remove}>Delete plan</button></div>
               </div>
               <div className="plan-grid about-you">
                 <label className="field"><span>Your age</span><input type="number" defaultValue={settings.fs_age ?? ""} placeholder="30" key={`age${plan.id}`} onBlur={(e) => saveSetting("fs_age", e.target.value)} /></label>
                 <label className="field"><span>Life expectancy (age)</span><input type="number" defaultValue={settings.fs_life ?? ""} placeholder="90" key={`life${plan.id}`} onBlur={(e) => saveSetting("fs_life", e.target.value)} /></label>
-                <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={`spend${plan.id}`} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
+                <label className="field"><span>Retirement spending / mo</span><input type="number" defaultValue={settings.fs_spend ?? ""} placeholder={fmt(retireSpending)} key={`sp${plan.id}`} onBlur={(e) => saveSetting("fs_spend", e.target.value)} /></label>
+                <label className="field"><span>Current rent/mortgage / mo</span><input type="number" defaultValue={settings.fs_housing ?? ""} placeholder="0" key={`ho${plan.id}`} onBlur={(e) => saveSetting("fs_housing", e.target.value)} /></label>
               </div>
             </section>
           )}
 
-          {plan && sel && chart && (
-            <>
-              <section className="card chart-card">
-                <div className="widget-head">
-                  <div>
-                    <span className="muted">Lifetime balance</span>
-                    <div className="widget-value">{fmt(sel.projected)}<span className="muted unit"> by {plan.target_year || currentYear}</span></div>
-                  </div>
+          {chart && (
+            <section className="card chart-card">
+              <div className="widget-head">
+                <div>
+                  <span className="muted">Net worth with all plans</span>
+                  <div className="widget-value">{fmt(chart.latest)}<span className="muted unit"> by {chart.xMax}</span></div>
                 </div>
-                {chart.series.length <= 1 ? (
-                  <p className="muted empty">Set a future target year and your age to see the projection.</p>
-                ) : (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={chart.series} margin={{ top: 16, right: 20, left: 4, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                      <XAxis dataKey="year" type="number" domain={[currentYear, chart.xMax]} allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
-                      <YAxis tickLine={false} axisLine={false} width={64} fontSize={12} tickFormatter={fmt} />
-                      <Tooltip formatter={(v) => fmtc(v)} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} />
-                      <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
-                      <Line type="monotone" dataKey="Projected" stroke={chart.lineColor} strokeWidth={2.5} dot={false} />
-                      {chart.markers.map((m) => (
-                        <ReferenceDot key={m.id} x={m.x} y={m.y} r={6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
+              </div>
+              {chart.data.length <= 1 ? (
+                <p className="muted empty">Set a future target year and your age to see the projection.</p>
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={chart.data} margin={{ top: 16, right: 20, left: 4, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="year" type="number" domain={[currentYear, chart.xMax]} allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
+                    <YAxis tickLine={false} axisLine={false} width={64} fontSize={12} tickFormatter={fmt} />
+                    <Tooltip formatter={(v) => fmtc(v)} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} />
+                    <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
+                    <Line type="monotone" dataKey="NetWorth" stroke={chart.lineColor} strokeWidth={2.5} dot={false} />
+                    {chart.markers.map((m) => (
+                      <ReferenceDot key={m.id} x={m.x} y={m.y} r={6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+              <ul className="foresight-legend">
+                {chart.markers.map((m) => (
+                  <li key={m.id}>
+                    <span className="legend-dot" style={{ background: m.color }} />
+                    <strong>{m.name}</strong>
+                    <span className="muted"> — {m.status}</span>
+                  </li>
+                ))}
+                {chart.ro && (
+                  <li>
+                    <span className="legend-dot" style={{ background: "var(--red)" }} />
+                    <span className="neg">Runs out of money in {chart.ro}</span>
+                    <span className="muted"> — at {fmtc(retireSpending)}/mo in retirement you'd go into debt.</span>
+                  </li>
                 )}
-                <ul className="foresight-legend">
-                  {chart.markers.map((m) => (
-                    <li key={m.id}>
-                      <span className="legend-dot" style={{ background: m.color }} />
-                      <strong>{m.name}</strong>
-                      <span className="muted"> — {m.status}</span>
+              </ul>
+            </section>
+          )}
+
+          {isHouse && houseInfo && (
+            <section className="card contrib-card">
+              <span className="muted">{plan.name} — what it costs</span>
+              <div className="contrib-amount">{fmt(houseInfo.pay)}<span className="muted unit"> / month mortgage</span></div>
+              <p className="muted">
+                Down payment {fmtc(houseInfo.down)} up front, then ~{fmtc(houseInfo.pay)}/mo on the mortgage.
+                {currentHousing > 0
+                  ? ` That ${houseInfo.delta >= 0 ? "is " + fmtc(houseInfo.delta) + " more" : "frees up " + fmtc(-houseInfo.delta)} than your current ${fmtc(currentHousing)}/mo housing, changing how much you can save.`
+                  : " Set your current rent/mortgage in Edit plan so this shows the change to your monthly savings."}
+                {" "}The home is treated as debt that pays down over time and appreciates at {plan.return_rate}%/yr — not as an investment return.
+              </p>
+            </section>
+          )}
+
+          {!isHouse && sel && sel.status !== "reached" && sel.years > 0 && (
+            <section className="card contrib-card">
+              <span className="muted">To stay on the projected path</span>
+              <div className="contrib-amount">{fmt(monthlyPlan)}<span className="muted unit"> / month</span></div>
+              <p className="muted">
+                Set aside about {fmtc(monthlyPlan)} each month toward <strong>{plan.name}</strong>
+                {sel.status === "behind" ? ` (up from your current ${fmtc(surplus)})` : ""} — invested at {plan.return_rate}% in an investment account.
+                {sel.status === "impossible" ? " Note: this is more than your current income, so this goal isn't reachable as set." : ""}
+              </p>
+            </section>
+          )}
+
+          {!isHouse && (
+            <section className="card">
+              <span className="muted">Where you could cut back</span>
+              {recs.length === 0 ? (
+                <p className="muted empty sm">Not enough spending data yet, or this goal needs a future target year.</p>
+              ) : (
+                <ul className="rec-list">
+                  {recs.map((r) => (
+                    <li key={r.cat} className="rec">
+                      <span className="rec-text">Trim 25% off <strong>{r.cat}</strong> (~{fmtc(r.saving)}/mo of your {fmtc(r.monthly)}/mo)</span>
+                      <span className="rec-grow pos">→ ~{fmt(r.grows)} by {plan.target_year || currentYear}</span>
                     </li>
                   ))}
-                  {chart.ro && (
-                    <li>
-                      <span className="legend-dot" style={{ background: "var(--red)" }} />
-                      <span className="neg">Runs out of money in {chart.ro}</span>
-                      <span className="muted"> — at {fmtc(retireSpending)}/mo in retirement you'd go into debt.</span>
-                    </li>
-                  )}
                 </ul>
-              </section>
-
-              {sel.status !== "reached" && sel.years > 0 && (
-                <section className="card contrib-card">
-                  <span className="muted">To stay on the projected path</span>
-                  <div className="contrib-amount">{fmt(monthlyPlan)}<span className="muted unit"> / month</span></div>
-                  <p className="muted">
-                    Set aside about {fmtc(monthlyPlan)} each month toward <strong>{plan.name}</strong>
-                    {sel.status === "behind" ? ` (up from your current ${fmtc(sel.contribution)})` : ""} — invested at your plan's {plan.return_rate}% return.
-                    Keeping it in an investment account (not a chequing account) is what earns that growth.
-                    {sel.status === "impossible" ? " Note: this is more than your current income, so this goal isn't reachable as set." : ""}
-                  </p>
-                </section>
               )}
-
-              <section className="card">
-                <span className="muted">Where you could cut back</span>
-                {recs.length === 0 ? (
-                  <p className="muted empty sm">Not enough spending data yet, or this goal needs a future target year.</p>
-                ) : (
-                  <ul className="rec-list">
-                    {recs.map((r) => (
-                      <li key={r.cat} className="rec">
-                        <span className="rec-text">Trim 25% off <strong>{r.cat}</strong> (~{fmtc(r.saving)}/mo of your {fmtc(r.monthly)}/mo)</span>
-                        <span className="rec-grow pos">→ ~{fmt(r.grows)} by {plan.target_year || currentYear}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-            </>
+            </section>
           )}
         </>
       )}
