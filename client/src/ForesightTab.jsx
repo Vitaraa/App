@@ -535,7 +535,23 @@ export default function ForesightTab({ txns = [] }) {
                     <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
                     <Line type="monotone" dataKey="NetWorth" stroke="url(#nwGradient)" strokeWidth={2.5} dot={false} activeDot={false} isAnimationActive={false} />
                     {chart.markers.map((m) => (
-                      <ReferenceDot key={m.id} x={m.x} y={m.y} r={drag && drag.id === m.id ? 8 : 6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" isAnimationActive={false} onMouseDown={() => startDrag(m.id, m.x)} style={{ cursor: "ew-resize" }} />
+                      <ReferenceDot
+                        key={m.id}
+                        x={m.x}
+                        y={m.y}
+                        ifOverflow="extendDomain"
+                        isAnimationActive={false}
+                        shape={({ cx, cy }) => {
+                          const active = drag && drag.id === m.id;
+                          const r = active ? 14 : 12;
+                          return (
+                            <g onMouseDown={() => startDrag(m.id, m.x)} style={{ cursor: "ew-resize" }}>
+                              <circle cx={cx} cy={cy} r={r} fill="var(--card)" stroke={m.color} strokeWidth={2.5} />
+                              <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={active ? 16 : 13} style={{ pointerEvents: "none" }}>{planIcon(m.kind)}</text>
+                            </g>
+                          );
+                        }}
+                      />
                     ))}
                   </LineChart>
                 </ResponsiveContainer>

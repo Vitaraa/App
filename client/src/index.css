@@ -192,6 +192,9 @@ select:focus {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /* Dragging markers shouldn't text-select the axis labels / titles. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 .empty {
   padding: 30px 0;
