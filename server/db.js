@@ -127,6 +127,7 @@ db.exec(`
     down_payment         REAL,           -- house plans
     loan_rate            REAL,           -- house mortgage rate %
     loan_term            INTEGER,        -- house mortgage term (years)
+    config               TEXT,           -- JSON: type-specific fields (end_year, pension_type, etc.)
     created_at           TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
@@ -204,5 +205,6 @@ const planCols = db.prepare("PRAGMA table_info(plans)").all().map((c) => c.name)
 if (!planCols.includes("down_payment")) addColumn("ALTER TABLE plans ADD COLUMN down_payment REAL");
 if (!planCols.includes("loan_rate")) addColumn("ALTER TABLE plans ADD COLUMN loan_rate REAL");
 if (!planCols.includes("loan_term")) addColumn("ALTER TABLE plans ADD COLUMN loan_term INTEGER");
+if (!planCols.includes("config")) addColumn("ALTER TABLE plans ADD COLUMN config TEXT");
 
 export default db;

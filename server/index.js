@@ -809,6 +809,9 @@ app.get("/api/plans", auth, (req, res) => {
   res.json(db.prepare("SELECT * FROM plans WHERE user_id = ? ORDER BY id").all(req.user.id));
 });
 
+const PLAN_KINDS = ["retirement", "house", "custom", "job", "education", "kids", "income", "expense", "pension"];
+const cfgStr = (c) => (c == null ? null : typeof c === "string" ? c : JSON.stringify(c));
+
 app.post("/api/plans", auth, (req, res) => {
   const b = req.body || {};
   if (!b.name || !String(b.name).trim())
@@ -816,13 +819,13 @@ app.post("/api/plans", auth, (req, res) => {
   const numN = (v) => (v != null && v !== "" ? Number(v) : null);
   const info = db
     .prepare(
-      `INSERT INTO plans (user_id, name, kind, target_amount, target_year, return_rate, start_amount, monthly_contribution, down_payment, loan_rate, loan_term)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO plans (user_id, name, kind, target_amount, target_year, return_rate, start_amount, monthly_contribution, down_payment, loan_rate, loan_term, config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       req.user.id,
       String(b.name).trim(),
-      ["retirement", "house", "custom"].includes(b.kind) ? b.kind : "custom",
+      PLAN_KINDS.includes(b.kind) ? b.kind : "custom",
       Number(b.target_amount) || 0,
       b.target_year != null ? Math.round(Number(b.target_year)) : null,
       Number(b.return_rate) || 7,
@@ -830,7 +833,8 @@ app.post("/api/plans", auth, (req, res) => {
       numN(b.monthly_contribution),
       numN(b.down_payment),
       numN(b.loan_rate),
-      b.loan_term != null && b.loan_term !== "" ? Math.round(Number(b.loan_term)) : null
+      b.loan_term != null && b.loan_term !== "" ? Math.round(Number(b.loan_term)) : null,
+      cfgStr(b.config)
     );
   res.status(201).json(db.prepare("SELECT * FROM plans WHERE id = ?").get(info.lastInsertRowid));
 });
@@ -842,11 +846,11 @@ app.patch("/api/plans/:id", auth, (req, res) => {
   const numOrNull = (v, cur) => (v === "" || v === null ? null : v != null ? Number(v) : cur);
   db.prepare(
     `UPDATE plans SET name = ?, kind = ?, target_amount = ?, target_year = ?, return_rate = ?,
-       start_amount = ?, monthly_contribution = ?, down_payment = ?, loan_rate = ?, loan_term = ?
+       start_amount = ?, monthly_contribution = ?, down_payment = ?, loan_rate = ?, loan_term = ?, config = ?
      WHERE id = ? AND user_id = ?`
   ).run(
     b.name != null ? String(b.name).trim() : row.name,
-    ["retirement", "house", "custom"].includes(b.kind) ? b.kind : row.kind,
+    PLAN_KINDS.includes(b.kind) ? b.kind : row.kind,
     b.target_amount != null ? Number(b.target_amount) || 0 : row.target_amount,
     b.target_year != null ? (b.target_year === "" ? null : Math.round(Number(b.target_year))) : row.target_year,
     b.return_rate != null ? Number(b.return_rate) || 0 : row.return_rate,
@@ -855,6 +859,7 @@ app.patch("/api/plans/:id", auth, (req, res) => {
     numOrNull(b.down_payment, row.down_payment),
     numOrNull(b.loan_rate, row.loan_rate),
     b.loan_term === "" || b.loan_term === null ? null : b.loan_term != null ? Math.round(Number(b.loan_term)) : row.loan_term,
+    b.config != null ? cfgStr(b.config) : row.config,
     row.id,
     req.user.id
   );

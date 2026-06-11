@@ -142,22 +142,30 @@ export function mortgagePayment(principal, annualRatePct, termYears) {
 //     that amortizes), the home appreciates, and the mortgage payment REPLACES
 //     the current housing cost (rent or prior mortgage) in the monthly cash flow.
 // Net worth = liquid + sum(home value − mortgage balance). Returns { series, events }.
+// `flows` are monthly cash-flow deltas active over [start, end] (e.g. a new job
+// raises income, kids add a yearly cost, a pension adds income). `lumps` are
+// one-time amounts at a year (generic one-off income/expense). `houses` are
+// modeled as debt (down payment, amortizing mortgage, appreciation; the payment
+// replaces current housing).
 export function simulateNetWorth(o) {
   const rInv = (Number(o.investReturn) || 0) / 100 / 12;
   let liquid = Number(o.startNetWorth) || 0;
-  let contribution = Number(o.surplus) || 0;
+  const baseSurplus = Number(o.surplus) || 0;
+  const retSpend = Number(o.retirementSpending) || 0;
   let housingCost = Number(o.currentHousing) || 0;
   const homes = [];
-  const byYear = {};
-  for (const h of o.houses || []) (byYear[h.year] ||= []).push(h);
+  const housesByYear = {};
+  for (const h of o.houses || []) (housesByYear[h.year] ||= []).push(h);
+  const lumpsByYear = {};
+  for (const l of o.lumps || []) (lumpsByYear[l.year] ||= []).push(l);
+  const flows = o.flows || [];
 
   const end = Math.max(o.currentYear + 1, Number(o.lifeYear) || o.currentYear);
   const series = [{ year: o.currentYear, value: round2(liquid) }];
-  const events = [];
 
   for (let y = o.currentYear + 1; y <= end; y++) {
-    // Execute any home purchases at the start of the year.
-    for (const h of byYear[y] || []) {
+    // Year-start one-time events: home purchases + lump income/expense.
+    for (const h of housesByYear[y] || []) {
       const price = Number(h.price) || 0;
       const down = h.downPayment != null && h.downPayment !== "" ? Number(h.downPayment) : price * 0.2;
       liquid -= down;
@@ -167,19 +175,24 @@ export function simulateNetWorth(o) {
         value: price,
         mortgage: bal,
         payment: pay,
-        rate: (Number(h.loanRate ?? 5.5)) / 100,
-        apprM: (Number(h.appreciation ?? 3)) / 100 / 12,
+        rate: Number(h.loanRate ?? 5.5) / 100,
+        apprM: Number(h.appreciation ?? 3) / 100 / 12,
+        housingDelta: pay - housingCost, // extra monthly cost vs prior housing
       });
-      contribution -= pay - housingCost; // mortgage now replaces the housing cost
       housingCost = pay;
-      events.push({ year: y, name: h.name, type: "house" });
     }
+    for (const l of lumpsByYear[y] || []) liquid += Number(l.amount) || 0;
+
     for (let m = 0; m < 12; m++) {
       liquid = liquid * (1 + rInv);
-      // After retirement there's no job income, so contributions (savings from
-      // income) stop entirely and we only draw down living expenses.
-      if (o.retirementYear && y > o.retirementYear) liquid -= Number(o.retirementSpending) || 0;
-      else liquid += contribution;
+      // After retirement there's no job income: base flow is just living-expense
+      // drawdown. Pensions/other flows still apply on top via `flows`.
+      const base = o.retirementYear && y > o.retirementYear ? -retSpend : baseSurplus;
+      let delta = 0;
+      for (const f of flows) if (y >= f.start && y <= f.end) delta += f.monthly;
+      let housingExtra = 0;
+      for (const h of homes) housingExtra += h.housingDelta;
+      liquid += base + delta - housingExtra;
       for (const h of homes) {
         h.value = h.value * (1 + h.apprM);
         const interest = h.mortgage * (h.rate / 12);
@@ -190,6 +203,5 @@ export function simulateNetWorth(o) {
     const equity = homes.reduce((s, h) => s + (h.value - h.mortgage), 0);
     series.push({ year: y, value: round2(liquid + equity) });
   }
-  if (o.retirementYear) events.push({ year: o.retirementYear, name: "Retirement", type: "retirement" });
-  return { series, events };
+  return { series };
 }
