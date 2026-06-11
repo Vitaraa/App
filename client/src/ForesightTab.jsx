@@ -32,8 +32,6 @@ const planIcon = (kind) => PLAN_ICONS[kind] || "📍";
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-const fmtc = (n) =>
-  Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
 const acctValue = (a) => (a.value != null ? Number(a.value) : Number(a.balance || 0));
 
 const KINDS = [
@@ -154,8 +152,6 @@ export default function ForesightTab({ txns = [] }) {
   // Budget-tab categories, split by side, used by the projected-budget table.
   const incomeCats = useMemo(() => budgets.filter((b) => b.type === "income"), [budgets]);
   const expenseCats = useMemo(() => budgets.filter((b) => b.type !== "income"), [budgets]);
-  const incomeCatNames = incomeCats.map((b) => b.category);
-  const expenseCatNames = expenseCats.map((b) => b.category);
   // Manual per-year tweaks to a category, stored as carry-forward change points:
   // [{ cat, year, amt }] (annual $). The effective value at year y is the latest
   // change point with year <= y, else the base annual budget.
@@ -323,58 +319,128 @@ export default function ForesightTab({ txns = [] }) {
     return { data, markers, xMax, ro, gradientOffset, latest: data[data.length - 1]?.NetWorth || 0 };
   }, [effectivePlans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
 
-  // Annual value a plan forces onto the category it "controls" in year y, or null
-  // if the plan isn't driving that category that year (so the cell stays editable).
-  function planControlledValue(p, y) {
-    const c = parseConfig(p);
-    const sY = p.target_year || currentYear;
-    const eY = Number(c.end_year) || sY;
-    const amt = Number(p.target_amount) || 0;
-    switch (p.kind) {
-      case "house": {
-        if (y < sY) return null;
-        const down = p.down_payment != null && p.down_payment !== "" ? Number(p.down_payment) : amt * 0.2;
-        const term = p.loan_term ?? 25;
-        return y < sY + term ? mortgagePayment(Math.max(0, amt - down), p.loan_rate ?? 5.5, term) * 12 : 0;
-      }
-      case "job": {
-        if (y < sY) return null;
-        return retirementYear && y > retirementYear ? 0 : afterTaxIncome(amt);
-      }
-      case "pension":
-        return y >= sY ? amt : null;
-      case "kids":
-      case "education":
-        return y >= sY && y <= eY ? amt : null;
-      case "income":
-      case "expense":
-        return !c.one_time && y >= sY && y <= eY ? amt : null;
-      default:
-        return null;
-    }
-  }
-
-  // Projected ANNUAL budget table: each income/expense category across every year,
-  // with plan-controlled cells locked from the plan's year and manual tweaks
-  // (carry-forward overrides) applied to the rest.
+  // Projected ANNUAL budget table. Plans map onto rows automatically:
+  //  • a Job change drives your salary income row (take-home, locked from its year)
+  //  • a House drives your housing expense row (mortgage, locked from purchase)
+  //  • Retirement zeroes only the salary row (other income & pensions continue)
+  //  • Pensions, other income/expense and education get their own locked rows
+  //  • a Child's cost is spread across grocery/health/insurance/etc. rows
+  // Everything else stays editable; tweaks carry forward.
   const budgetTable = useMemo(() => {
     if (!incomeCats.length && !expenseCats.length) return null;
     const xMaxLocal = Math.max(lifeYear, currentYear + 1, ...plans.map((p) => p.target_year || 0));
     const years = [];
     for (let y = currentYear; y <= xMaxLocal; y++) years.push(y);
-    const buildRows = (cats) =>
-      cats.map((b) => {
-        const baseAnnual = Number(b.amount || 0) * 12;
-        const ctrl = plans.find((p) => parseConfig(p).controls_category === b.category) || null;
-        const cells = years.map((y) => {
-          const pv = ctrl ? planControlledValue(ctrl, y) : null;
-          const locked = pv != null;
-          return { year: y, value: Math.round(locked ? pv : effBase(b.category, baseAnnual, y)), locked };
-        });
-        return { category: b.category, controlledBy: ctrl ? ctrl.name : null, cells };
+    const retireY = retirementYear;
+
+    const job = plans.find((p) => p.kind === "job") || null;
+    const house = plans.find((p) => p.kind === "house" && (p.target_year || currentYear) > currentYear) || null;
+    const salaryCat = incomeCats.find((b) => /salar|wage|\bjob\b|employ|paycheck/i.test(b.category))?.category || incomeCats[0]?.category || null;
+    const housingCat = expenseCats.find((b) => /hous|rent|mortgag/i.test(b.category))?.category || null;
+
+    const houseAnnual = (y) => {
+      if (!house) return null;
+      const sY = house.target_year || currentYear;
+      if (y < sY) return null;
+      const price = Number(house.target_amount) || 0;
+      const down = house.down_payment != null && house.down_payment !== "" ? Number(house.down_payment) : price * 0.2;
+      const term = house.loan_term ?? 25;
+      return y < sY + term ? Math.round(mortgagePayment(Math.max(0, price - down), house.loan_rate ?? 5.5, term) * 12) : 0;
+    };
+    const jobAnnual = (y) => {
+      if (!job) return null;
+      const sY = job.target_year || currentYear;
+      return y < sY ? null : Math.round(afterTaxIncome(Number(job.target_amount) || 0));
+    };
+
+    // Spread each child's annual cost across matching expense categories; whatever
+    // can't be matched falls into a "Children" row.
+    const KID_W = { groceries: 3, food: 3, health: 1.5, education: 2, insurance: 1, clothing: 1, shopping: 1 };
+    const kidPlans = plans.filter((p) => p.kind === "kids");
+    const kidByYear = {};
+    for (const y of years) {
+      const byCat = {};
+      let leftover = 0;
+      for (const p of kidPlans) {
+        const c = parseConfig(p);
+        const sY = p.target_year || currentYear;
+        const eY = Number(c.end_year) || sY;
+        if (y < sY || y > eY) continue;
+        const cost = Number(p.target_amount) || 0;
+        const matched = expenseCats.map((b) => ({ cat: b.category, w: KID_W[b.category.toLowerCase()] || 0 })).filter((x) => x.w > 0);
+        const totalW = matched.reduce((s, x) => s + x.w, 0);
+        if (totalW > 0) for (const m of matched) byCat[m.cat] = (byCat[m.cat] || 0) + cost * (m.w / totalW);
+        else leftover += cost;
+      }
+      kidByYear[y] = { byCat, leftover };
+    }
+
+    // Income rows.
+    const incomeRows = incomeCats.map((b) => {
+      const baseAnnual = Number(b.amount || 0) * 12;
+      const cells = years.map((y) => {
+        if (b.category === salaryCat) {
+          if (retireY && y > retireY) return { year: y, value: 0, locked: true };
+          const j = jobAnnual(y);
+          if (j != null) return { year: y, value: j, locked: true };
+        }
+        return { year: y, value: Math.round(effBase(b.category, baseAnnual, y)), locked: false };
       });
-    const incomeRows = buildRows(incomeCats);
-    const expenseRows = buildRows(expenseCats);
+      return { category: b.category, cells };
+    });
+    if (job && !salaryCat) {
+      incomeRows.push({ category: "Salary", cells: years.map((y) => (retireY && y > retireY ? { year: y, value: 0, locked: true } : { year: y, value: jobAnnual(y) ?? 0, locked: true })) });
+    }
+    for (const p of plans.filter((pp) => pp.kind === "pension")) {
+      const sY = p.target_year || currentYear;
+      const amt = Math.round(Number(p.target_amount) || 0);
+      incomeRows.push({ category: p.name || "Pension", cells: years.map((y) => ({ year: y, value: y >= sY ? amt : 0, locked: true })) });
+    }
+    for (const p of plans.filter((pp) => pp.kind === "income" && !parseConfig(pp).one_time)) {
+      const c = parseConfig(p);
+      const sY = p.target_year || currentYear;
+      const eY = Number(c.end_year) || sY;
+      const amt = Math.round(Number(p.target_amount) || 0);
+      incomeRows.push({ category: p.name || "Income", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
+    }
+
+    // Expense rows.
+    const expenseRows = expenseCats.map((b) => {
+      const baseAnnual = Number(b.amount || 0) * 12;
+      const cells = years.map((y) => {
+        let value = effBase(b.category, baseAnnual, y);
+        let locked = false;
+        if (b.category === housingCat) {
+          const h = houseAnnual(y);
+          if (h != null) { value = h; locked = true; }
+        }
+        const kidAdd = kidByYear[y].byCat[b.category] || 0;
+        if (kidAdd > 0) { value += kidAdd; locked = true; }
+        return { year: y, value: Math.round(value), locked };
+      });
+      return { category: b.category, cells };
+    });
+    if (house && !housingCat) {
+      expenseRows.push({ category: "Housing", cells: years.map((y) => ({ year: y, value: houseAnnual(y) ?? 0, locked: true })) });
+    }
+    for (const p of plans.filter((pp) => pp.kind === "expense" && !parseConfig(pp).one_time)) {
+      const c = parseConfig(p);
+      const sY = p.target_year || currentYear;
+      const eY = Number(c.end_year) || sY;
+      const amt = Math.round(Number(p.target_amount) || 0);
+      expenseRows.push({ category: p.name || "Expense", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
+    }
+    for (const p of plans.filter((pp) => pp.kind === "education")) {
+      const c = parseConfig(p);
+      const sY = p.target_year || currentYear;
+      const eY = Number(c.end_year) || sY;
+      const amt = Math.round(Number(p.target_amount) || 0);
+      expenseRows.push({ category: p.name || "Tuition", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
+    }
+    if (years.some((y) => kidByYear[y].leftover > 0)) {
+      expenseRows.push({ category: "Children", cells: years.map((y) => ({ year: y, value: Math.round(kidByYear[y].leftover || 0), locked: true })) });
+    }
+
     const totals = years.map((y, i) => {
       const income = incomeRows.reduce((s, r) => s + r.cells[i].value, 0);
       const expense = expenseRows.reduce((s, r) => s + r.cells[i].value, 0);
@@ -383,14 +449,6 @@ export default function ForesightTab({ txns = [] }) {
     return { years, incomeRows, expenseRows, totals };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plans, incomeCats, expenseCats, overrides, currentYear, lifeYear, retirementYear]);
-
-  const houseInfo = useMemo(() => {
-    if (!plan || plan.kind !== "house") return null;
-    const price = plan.target_amount || 0;
-    const down = plan.down_payment != null ? plan.down_payment : price * 0.2;
-    const pay = mortgagePayment(Math.max(0, price - down), plan.loan_rate ?? 5.5, plan.loan_term ?? 25);
-    return { down, pay, delta: pay - currentHousing };
-  }, [plan, currentHousing]);
 
 
   // Sensible defaults for each plan type — shared by "New plan" and type-switch.
@@ -497,16 +555,6 @@ export default function ForesightTab({ txns = [] }) {
   //   onSlider  (pos)          => persist the job invest slider
   //   kf        (s) => unique input key
   function planFieldRows(kind, v, c, onField, onConfig, onSlider, kf) {
-    // Lets a budget-affecting plan "own" one of your budget rows; from this plan's
-    // year that row is locked in the projected-budget table.
-    const ctrlSelect = (cats) => (
-      <label className="field"><span>Controls budget row</span>
-        <select value={c.controls_category || ""} onChange={(e) => onConfig("controls_category", e.target.value)}>
-          <option value="">— none —</option>
-          {cats.map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
-      </label>
-    );
     return (
       <>
         {kind === "retirement" && (
@@ -524,7 +572,6 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>Mortgage rate %</span><input type="number" step="0.1" defaultValue={v.loan_rate ?? ""} placeholder="5.5" key={kf("lr")} onBlur={(e) => onField("loan_rate", e.target.value)} /></label>
             <label className="field"><span>Mortgage term (yrs)</span><input type="number" defaultValue={v.loan_term ?? ""} placeholder="25" key={kf("lt")} onBlur={(e) => onField("loan_term", e.target.value)} /></label>
             <label className="field"><span>Appreciation % / yr</span><input type="number" step="0.1" defaultValue={v.return_rate} key={kf("r")} onBlur={(e) => onField("return_rate", e.target.value)} /></label>
-            {ctrlSelect(expenseCatNames)}
           </>
         )}
         {kind === "job" && (
@@ -554,7 +601,6 @@ export default function ForesightTab({ txns = [] }) {
                 </div>
               );
             })()}
-            {ctrlSelect(incomeCatNames)}
           </>
         )}
         {kind === "education" && (
@@ -563,7 +609,6 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>End year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>
             <label className="field"><span>Tuition / yr</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
             <label className="field"><span>Income while studying / yr</span><input type="number" defaultValue={c.school_income ?? ""} placeholder={`Same (${fmt(monthlyIncome * 12)})`} key={kf("si")} onBlur={(e) => onConfig("school_income", e.target.value)} /></label>
-            {ctrlSelect(expenseCatNames)}
           </>
         )}
         {kind === "kids" && (
@@ -571,7 +616,6 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>Start year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
             <label className="field"><span>Support until year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>
             <label className="field"><span>Cost / yr (CA est.)</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
-            {ctrlSelect(expenseCatNames)}
           </>
         )}
         {(kind === "income" || kind === "expense") && (
@@ -580,7 +624,6 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>{c.one_time ? "Year" : "Start year"}</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
             {!c.one_time && <label className="field"><span>End year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>}
             <label className="field checkbox-field"><span>One-time</span><input type="checkbox" checked={!!c.one_time} onChange={(e) => onConfig("one_time", e.target.checked)} /></label>
-            {!c.one_time && ctrlSelect(kind === "income" ? incomeCatNames : expenseCatNames)}
           </>
         )}
         {kind === "pension" && (
@@ -588,7 +631,6 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>Pension type</span><select value={c.pension_type || "CPP"} onChange={(e) => onConfig("pension_type", e.target.value)}>{PENSION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
             <label className="field"><span>Income / yr</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
             <label className="field"><span>Starts in year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
-            {ctrlSelect(incomeCatNames)}
           </>
         )}
       </>
@@ -744,7 +786,7 @@ export default function ForesightTab({ txns = [] }) {
                         {row.cells.map((cell) => (
                           <td key={cell.year} className="right">
                             {cell.locked
-                              ? <span className="bt-locked" title={`Set by ${row.controlledBy} plan`}>{fmt(cell.value)} 🔒</span>
+                              ? <span className="bt-locked" title="Set by a plan — edit the plan to change">{fmt(cell.value)} 🔒</span>
                               : <input type="number" className="bt-input" defaultValue={cell.value} key={`${row.category}-${cell.year}-${cell.value}`} onBlur={(e) => setOverride(row.category, cell.year, e.target.value)} />}
                           </td>
                         ))}
@@ -759,7 +801,7 @@ export default function ForesightTab({ txns = [] }) {
                         {row.cells.map((cell) => (
                           <td key={cell.year} className="right">
                             {cell.locked
-                              ? <span className="bt-locked" title={`Set by ${row.controlledBy} plan`}>{fmt(cell.value)} 🔒</span>
+                              ? <span className="bt-locked" title="Set by a plan — edit the plan to change">{fmt(cell.value)} 🔒</span>
                               : <input type="number" className="bt-input" defaultValue={cell.value} key={`${row.category}-${cell.year}-${cell.value}`} onBlur={(e) => setOverride(row.category, cell.year, e.target.value)} />}
                           </td>
                         ))}
@@ -771,20 +813,6 @@ export default function ForesightTab({ txns = [] }) {
                   </tbody>
                 </table>
               </div>
-            </section>
-          )}
-
-          {k === "house" && houseInfo && (
-            <section className="card contrib-card">
-              <span className="muted">{plan.name} — what it costs</span>
-              <div className="contrib-amount">{fmt(houseInfo.pay)}<span className="muted unit"> / month mortgage</span></div>
-              <p className="muted">
-                Down payment {fmtc(houseInfo.down)} up front, then ~{fmtc(houseInfo.pay)}/mo.
-                {currentHousing > 0
-                  ? ` That ${houseInfo.delta >= 0 ? "is " + fmtc(houseInfo.delta) + " more" : "frees up " + fmtc(-houseInfo.delta)} than your current ${fmtc(currentHousing)}/mo housing.`
-                  : " Set your current rent/mortgage in Settings to see the change to your savings."}
-                {" "}The home is treated as debt that pays down and appreciates {plan.return_rate}%/yr — not as an investment return.
-              </p>
             </section>
           )}
 
