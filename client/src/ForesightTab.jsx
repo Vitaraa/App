@@ -48,6 +48,7 @@ export default function ForesightTab({ txns = [] }) {
   const [plans, setPlans] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [settings, setSettings] = useState({});
+  const [budgets, setBudgets] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [editing, setEditing] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
@@ -57,10 +58,11 @@ export default function ForesightTab({ txns = [] }) {
 
   async function load() {
     try {
-      const [p, a, s] = await Promise.all([api.listPlans(), api.listAccounts(), api.getSettings()]);
+      const [p, a, s, b] = await Promise.all([api.listPlans(), api.listAccounts(), api.getSettings(), api.listBudgets()]);
       setPlans(p);
       setAccounts(a);
       setSettings(s);
+      setBudgets(b);
       setSelectedId((cur) => (p.some((x) => x.id === cur) ? cur : p[0] ? p[0].id : null));
     } catch {
       /* ignore */
@@ -78,7 +80,7 @@ export default function ForesightTab({ txns = [] }) {
       }, 0),
     [accounts]
   );
-  const { monthlyIncome, monthlyExpense, surplus } = useMemo(() => {
+  const { monthlyIncome, monthlyExpense } = useMemo(() => {
     const months = new Set();
     let inc = 0;
     let exp = 0;
@@ -88,8 +90,20 @@ export default function ForesightTab({ txns = [] }) {
       else exp += Number(t.amount || 0);
     }
     const n = Math.max(1, months.size);
-    return { monthlyIncome: inc / n, monthlyExpense: exp / n, surplus: Math.max(0, (inc - exp) / n) };
+    return { monthlyIncome: inc / n, monthlyExpense: exp / n };
   }, [txns]);
+
+  // What the user actually plans to spend each month — the sum of their Budget-tab
+  // category limits. This is the basis for how much can be invested, instead of
+  // assuming every dollar of income is saved.
+  const budgetedExpense = useMemo(
+    () => budgets.reduce((s, b) => s + Number(b.amount || 0), 0),
+    [budgets]
+  );
+  // Use the budget when one is set; otherwise fall back to observed spending.
+  const plannedExpense = budgetedExpense > 0 ? budgetedExpense : monthlyExpense;
+  // Monthly amount available to invest = income minus planned spending.
+  const surplus = Math.max(0, monthlyIncome - plannedExpense);
 
   const catMonthly = useMemo(() => {
     const months = new Set();
@@ -108,7 +122,7 @@ export default function ForesightTab({ txns = [] }) {
   const age = Number(settings.fs_age) || 30;
   const lifeExp = Number(settings.fs_life) || 90;
   const retireSpending =
-    settings.fs_spend != null && settings.fs_spend !== "" ? Number(settings.fs_spend) : Math.round(monthlyExpense) || 4000;
+    settings.fs_spend != null && settings.fs_spend !== "" ? Number(settings.fs_spend) : Math.round(plannedExpense) || 4000;
   const currentHousing = settings.fs_housing != null && settings.fs_housing !== "" ? Number(settings.fs_housing) : 0;
   const lifeYear = currentYear + Math.max(1, lifeExp - age);
 
@@ -142,7 +156,12 @@ export default function ForesightTab({ txns = [] }) {
             houses.push({ year: startY, price: amt, downPayment: p.down_payment, loanRate: p.loan_rate ?? 5.5, loanTerm: p.loan_term ?? 25, appreciation: p.return_rate ?? 3, name: p.name });
           break;
         case "job":
-          flows.push({ start: startY, end: retirementYear || lifeYear, monthly: amt / 12 - monthlyIncome });
+          // A job is your primary income: what you invest from it is the salary
+          // minus your planned monthly spending (from the Budget tab) — not the
+          // whole paycheck. Subtracting `surplus` cancels the base saving the
+          // sim already applies, so the net monthly saving lands at amt/12 −
+          // plannedExpense.
+          flows.push({ start: startY, end: retirementYear || lifeYear, monthly: amt / 12 - plannedExpense - surplus });
           break;
         case "education": {
           const schoolInc = c.school_income != null && c.school_income !== "" ? Number(c.school_income) : monthlyIncome * 12;
@@ -220,7 +239,7 @@ export default function ForesightTab({ txns = [] }) {
     });
     const ro = runsOutYear(series);
     return { data, markers, xMax, ro, lineColor: ro ? "var(--red)" : "var(--green)", latest: data[data.length - 1]?.NetWorth || 0 };
-  }, [plans, netWorth, surplus, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
+  }, [plans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
 
   const houseInfo = useMemo(() => {
     if (!plan || plan.kind !== "house") return null;
