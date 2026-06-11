@@ -9,7 +9,6 @@ import {
   CartesianGrid,
   ReferenceDot,
   ReferenceLine,
-  Legend,
 } from "recharts";
 import { api } from "./api.js";
 import PageActions from "./PageActions.jsx";
@@ -151,6 +150,33 @@ export default function ForesightTab({ txns = [] }) {
   const plannedExpense = budgetedExpense > 0 ? budgetedExpense : monthlyExpenseTxn;
   // Monthly amount available to invest = income minus planned spending.
   const surplus = Math.max(0, monthlyIncome - plannedExpense);
+
+  // Budget-tab categories, split by side, used by the projected-budget table.
+  const incomeCats = useMemo(() => budgets.filter((b) => b.type === "income"), [budgets]);
+  const expenseCats = useMemo(() => budgets.filter((b) => b.type !== "income"), [budgets]);
+  const incomeCatNames = incomeCats.map((b) => b.category);
+  const expenseCatNames = expenseCats.map((b) => b.category);
+  // Manual per-year tweaks to a category, stored as carry-forward change points:
+  // [{ cat, year, amt }] (annual $). The effective value at year y is the latest
+  // change point with year <= y, else the base annual budget.
+  const overrides = useMemo(() => {
+    try {
+      return settings.fs_budget_overrides ? JSON.parse(settings.fs_budget_overrides) : [];
+    } catch {
+      return [];
+    }
+  }, [settings.fs_budget_overrides]);
+  function effBase(cat, baseAnnual, y) {
+    let v = baseAnnual;
+    let best = -Infinity;
+    for (const o of overrides) if (o.cat === cat && o.year <= y && o.year > best) { best = o.year; v = o.amt; }
+    return v;
+  }
+  async function setOverride(cat, year, amount) {
+    const next = overrides.filter((o) => !(o.cat === cat && o.year === year));
+    next.push({ cat, year, amt: Math.max(0, Math.round(Number(amount) || 0)) });
+    await saveSetting("fs_budget_overrides", JSON.stringify(next));
+  }
 
   const age = Number(settings.fs_age) || 30;
   const lifeExp = Number(settings.fs_life) || 90;
@@ -297,54 +323,66 @@ export default function ForesightTab({ txns = [] }) {
     return { data, markers, xMax, ro, gradientOffset, latest: data[data.length - 1]?.NetWorth || 0 };
   }, [effectivePlans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
 
-  // Projected MONTHLY budget year by year — how income, expenses and leftover
-  // savings change as plans kick in (a job raises income, a house adds a
-  // mortgage, kids add cost, retirement swaps salary for drawdown spending).
-  const budgetChart = useMemo(() => {
-    if (!effectivePlans.length) return null;
-    const retireY = effectivePlans.find((p) => p.kind === "retirement")?.target_year || null;
-    const xMaxLocal = Math.max(lifeYear, currentYear + 1, ...effectivePlans.map((p) => p.target_year || 0));
-    const data = [];
-    for (let y = currentYear; y <= xMaxLocal; y++) {
-      const retired = retireY && y > retireY;
-      let income = retired ? 0 : monthlyIncome;
-      let expense = retired ? retireSpending : plannedExpense;
-      for (const p of effectivePlans) {
-        const c = parseConfig(p);
-        const sY = p.target_year || currentYear;
-        const eY = Number(c.end_year) || sY;
-        const amt = Number(p.target_amount) || 0;
-        if (p.kind === "job" && !retired && y >= sY) {
-          const takeHome = afterTaxIncome(amt) / 12;
-          const delta = takeHome - monthlyIncome;
-          income = takeHome;
-          if (delta > 0) {
-            const rate = monthlyIncome > 0 ? Math.min(1, Math.max(0, surplus / monthlyIncome)) : 1;
-            expense += delta - investedExtra(c.invest_pos ?? 0.5, delta, rate); // the lifestyle (un-invested) part of the raise
-          }
-        } else if (p.kind === "house" && sY > currentYear && y >= sY) {
-          const price = amt;
-          const down = p.down_payment != null && p.down_payment !== "" ? Number(p.down_payment) : price * 0.2;
-          const term = p.loan_term ?? 25;
-          if (y < sY + term) expense += Math.max(0, mortgagePayment(Math.max(0, price - down), p.loan_rate ?? 5.5, term) - currentHousing);
-        } else if (p.kind === "kids" && y >= sY && y <= eY) {
-          expense += amt / 12;
-        } else if (p.kind === "education" && y >= sY && y <= eY) {
-          const schoolInc = c.school_income != null && c.school_income !== "" ? Number(c.school_income) : monthlyIncome * 12;
-          if (!retired) income = schoolInc / 12;
-          expense += amt / 12;
-        } else if (p.kind === "pension" && y >= sY) {
-          income += amt / 12;
-        } else if (p.kind === "income" && !c.one_time && y >= sY && y <= eY) {
-          income += amt / 12;
-        } else if (p.kind === "expense" && !c.one_time && y >= sY && y <= eY) {
-          expense += amt / 12;
-        }
+  // Annual value a plan forces onto the category it "controls" in year y, or null
+  // if the plan isn't driving that category that year (so the cell stays editable).
+  function planControlledValue(p, y) {
+    const c = parseConfig(p);
+    const sY = p.target_year || currentYear;
+    const eY = Number(c.end_year) || sY;
+    const amt = Number(p.target_amount) || 0;
+    switch (p.kind) {
+      case "house": {
+        if (y < sY) return null;
+        const down = p.down_payment != null && p.down_payment !== "" ? Number(p.down_payment) : amt * 0.2;
+        const term = p.loan_term ?? 25;
+        return y < sY + term ? mortgagePayment(Math.max(0, amt - down), p.loan_rate ?? 5.5, term) * 12 : 0;
       }
-      data.push({ year: y, Income: Math.round(income), Expenses: Math.round(expense), Savings: Math.round(income - expense) });
+      case "job": {
+        if (y < sY) return null;
+        return retirementYear && y > retirementYear ? 0 : afterTaxIncome(amt);
+      }
+      case "pension":
+        return y >= sY ? amt : null;
+      case "kids":
+      case "education":
+        return y >= sY && y <= eY ? amt : null;
+      case "income":
+      case "expense":
+        return !c.one_time && y >= sY && y <= eY ? amt : null;
+      default:
+        return null;
     }
-    return { data, xMax: xMaxLocal };
-  }, [effectivePlans, monthlyIncome, plannedExpense, surplus, retireSpending, currentHousing, currentYear, lifeYear]);
+  }
+
+  // Projected ANNUAL budget table: each income/expense category across every year,
+  // with plan-controlled cells locked from the plan's year and manual tweaks
+  // (carry-forward overrides) applied to the rest.
+  const budgetTable = useMemo(() => {
+    if (!incomeCats.length && !expenseCats.length) return null;
+    const xMaxLocal = Math.max(lifeYear, currentYear + 1, ...plans.map((p) => p.target_year || 0));
+    const years = [];
+    for (let y = currentYear; y <= xMaxLocal; y++) years.push(y);
+    const buildRows = (cats) =>
+      cats.map((b) => {
+        const baseAnnual = Number(b.amount || 0) * 12;
+        const ctrl = plans.find((p) => parseConfig(p).controls_category === b.category) || null;
+        const cells = years.map((y) => {
+          const pv = ctrl ? planControlledValue(ctrl, y) : null;
+          const locked = pv != null;
+          return { year: y, value: Math.round(locked ? pv : effBase(b.category, baseAnnual, y)), locked };
+        });
+        return { category: b.category, controlledBy: ctrl ? ctrl.name : null, cells };
+      });
+    const incomeRows = buildRows(incomeCats);
+    const expenseRows = buildRows(expenseCats);
+    const totals = years.map((y, i) => {
+      const income = incomeRows.reduce((s, r) => s + r.cells[i].value, 0);
+      const expense = expenseRows.reduce((s, r) => s + r.cells[i].value, 0);
+      return { year: y, income, expense, net: income - expense };
+    });
+    return { years, incomeRows, expenseRows, totals };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plans, incomeCats, expenseCats, overrides, currentYear, lifeYear, retirementYear]);
 
   const houseInfo = useMemo(() => {
     if (!plan || plan.kind !== "house") return null;
@@ -459,6 +497,16 @@ export default function ForesightTab({ txns = [] }) {
   //   onSlider  (pos)          => persist the job invest slider
   //   kf        (s) => unique input key
   function planFieldRows(kind, v, c, onField, onConfig, onSlider, kf) {
+    // Lets a budget-affecting plan "own" one of your budget rows; from this plan's
+    // year that row is locked in the projected-budget table.
+    const ctrlSelect = (cats) => (
+      <label className="field"><span>Controls budget row</span>
+        <select value={c.controls_category || ""} onChange={(e) => onConfig("controls_category", e.target.value)}>
+          <option value="">— none —</option>
+          {cats.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+      </label>
+    );
     return (
       <>
         {kind === "retirement" && (
@@ -476,6 +524,7 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>Mortgage rate %</span><input type="number" step="0.1" defaultValue={v.loan_rate ?? ""} placeholder="5.5" key={kf("lr")} onBlur={(e) => onField("loan_rate", e.target.value)} /></label>
             <label className="field"><span>Mortgage term (yrs)</span><input type="number" defaultValue={v.loan_term ?? ""} placeholder="25" key={kf("lt")} onBlur={(e) => onField("loan_term", e.target.value)} /></label>
             <label className="field"><span>Appreciation % / yr</span><input type="number" step="0.1" defaultValue={v.return_rate} key={kf("r")} onBlur={(e) => onField("return_rate", e.target.value)} /></label>
+            {ctrlSelect(expenseCatNames)}
           </>
         )}
         {kind === "job" && (
@@ -505,6 +554,7 @@ export default function ForesightTab({ txns = [] }) {
                 </div>
               );
             })()}
+            {ctrlSelect(incomeCatNames)}
           </>
         )}
         {kind === "education" && (
@@ -513,6 +563,7 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>End year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>
             <label className="field"><span>Tuition / yr</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
             <label className="field"><span>Income while studying / yr</span><input type="number" defaultValue={c.school_income ?? ""} placeholder={`Same (${fmt(monthlyIncome * 12)})`} key={kf("si")} onBlur={(e) => onConfig("school_income", e.target.value)} /></label>
+            {ctrlSelect(expenseCatNames)}
           </>
         )}
         {kind === "kids" && (
@@ -520,6 +571,7 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>Start year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
             <label className="field"><span>Support until year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>
             <label className="field"><span>Cost / yr (CA est.)</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
+            {ctrlSelect(expenseCatNames)}
           </>
         )}
         {(kind === "income" || kind === "expense") && (
@@ -528,6 +580,7 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>{c.one_time ? "Year" : "Start year"}</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
             {!c.one_time && <label className="field"><span>End year</span><input type="number" defaultValue={c.end_year ?? ""} key={kf("e")} onBlur={(e) => onConfig("end_year", e.target.value)} /></label>}
             <label className="field checkbox-field"><span>One-time</span><input type="checkbox" checked={!!c.one_time} onChange={(e) => onConfig("one_time", e.target.checked)} /></label>
+            {!c.one_time && ctrlSelect(kind === "income" ? incomeCatNames : expenseCatNames)}
           </>
         )}
         {kind === "pension" && (
@@ -535,6 +588,7 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>Pension type</span><select value={c.pension_type || "CPP"} onChange={(e) => onConfig("pension_type", e.target.value)}>{PENSION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
             <label className="field"><span>Income / yr</span><input type="number" defaultValue={v.target_amount} key={kf("t")} onBlur={(e) => onField("target_amount", e.target.value)} /></label>
             <label className="field"><span>Starts in year</span><input type="number" defaultValue={v.target_year || ""} key={kf("y")} onBlur={(e) => onField("target_year", e.target.value)} /></label>
+            {ctrlSelect(incomeCatNames)}
           </>
         )}
       </>
@@ -664,28 +718,59 @@ export default function ForesightTab({ txns = [] }) {
             </section>
           )}
 
-          {budgetChart && budgetChart.data.length > 1 && (
-            <section className="card chart-card">
+          {budgetTable && (budgetTable.incomeRows.length > 0 || budgetTable.expenseRows.length > 0) && (
+            <section className="card">
               <div className="widget-head">
                 <div>
-                  <span className="muted">Projected monthly budget</span>
-                  <div className="widget-value">{fmt(budgetChart.data[0].Savings)}<span className="muted unit"> / mo saved now</span></div>
-                  <span className="muted drag-hint">How income, expenses & savings shift as your plans take effect.</span>
+                  <span className="muted">Projected budget by year</span>
+                  <span className="muted drag-hint">Annual $. Tweak any cell to rebalance; 🔒 cells are set by a plan — edit the plan to change those. Over-budget years are red.</span>
                 </div>
               </div>
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={budgetChart.data} margin={{ top: 16, right: 20, left: 4, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="year" type="number" domain={[currentYear, budgetChart.xMax]} allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
-                  <YAxis tickLine={false} axisLine={false} width={64} fontSize={12} tickFormatter={fmt} />
-                  <Tooltip formatter={(v) => fmtc(v)} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} />
-                  <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
-                  <Legend />
-                  <Line type="monotone" dataKey="Income" stroke="var(--green)" strokeWidth={2} dot={false} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="Expenses" stroke="var(--red)" strokeWidth={2} dot={false} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="Savings" stroke="var(--accent)" strokeWidth={2.5} dot={false} isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
+              <div className="budget-proj-wrap">
+                <table className="budget-proj-table">
+                  <thead>
+                    <tr>
+                      <th className="bt-row-head">Category</th>
+                      {budgetTable.years.map((y, i) => (
+                        <th key={y} className={`right ${budgetTable.totals[i].net < 0 ? "neg" : ""}`}>{y}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="bt-section"><td className="bt-row-head">Income</td>{budgetTable.years.map((y) => <td key={y} />)}</tr>
+                    {budgetTable.incomeRows.map((row) => (
+                      <tr key={`i-${row.category}`}>
+                        <td className="bt-row-head">{row.category}</td>
+                        {row.cells.map((cell) => (
+                          <td key={cell.year} className="right">
+                            {cell.locked
+                              ? <span className="bt-locked" title={`Set by ${row.controlledBy} plan`}>{fmt(cell.value)} 🔒</span>
+                              : <input type="number" className="bt-input" defaultValue={cell.value} key={`${row.category}-${cell.year}-${cell.value}`} onBlur={(e) => setOverride(row.category, cell.year, e.target.value)} />}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                    <tr className="bt-subtotal"><td className="bt-row-head">Total income</td>{budgetTable.totals.map((t) => <td key={t.year} className="right">{fmt(t.income)}</td>)}</tr>
+
+                    <tr className="bt-section"><td className="bt-row-head">Expense</td>{budgetTable.years.map((y) => <td key={y} />)}</tr>
+                    {budgetTable.expenseRows.map((row) => (
+                      <tr key={`e-${row.category}`}>
+                        <td className="bt-row-head">{row.category}</td>
+                        {row.cells.map((cell) => (
+                          <td key={cell.year} className="right">
+                            {cell.locked
+                              ? <span className="bt-locked" title={`Set by ${row.controlledBy} plan`}>{fmt(cell.value)} 🔒</span>
+                              : <input type="number" className="bt-input" defaultValue={cell.value} key={`${row.category}-${cell.year}-${cell.value}`} onBlur={(e) => setOverride(row.category, cell.year, e.target.value)} />}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                    <tr className="bt-subtotal"><td className="bt-row-head">Total expense</td>{budgetTable.totals.map((t) => <td key={t.year} className="right">{fmt(t.expense)}</td>)}</tr>
+
+                    <tr className="bt-net"><td className="bt-row-head">Net / yr</td>{budgetTable.totals.map((t) => <td key={t.year} className={`right ${t.net < 0 ? "neg" : "pos"}`}>{fmt(t.net)}</td>)}</tr>
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
 
