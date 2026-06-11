@@ -88,6 +88,37 @@ export function compoundedSaving(monthlySaving, annualRatePct, years) {
   return round2(futureValue(0, monthlySaving, annualRatePct, years));
 }
 
+// Rough after-tax (take-home) annual income from a gross salary, using a
+// simplified progressive bracket table (approximate combined federal+provincial
+// marginal rates). Good enough to keep projections realistic without modeling a
+// full tax return.
+const TAX_BRACKETS = [
+  [15000, 0.0], // basic personal amount — effectively untaxed
+  [53000, 0.2],
+  [106000, 0.3],
+  [165000, 0.38],
+  [Infinity, 0.45],
+];
+export function afterTaxIncome(gross) {
+  let g = Math.max(0, Number(gross) || 0);
+  let tax = 0;
+  let lower = 0;
+  for (const [upper, rate] of TAX_BRACKETS) {
+    if (g <= lower) break;
+    tax += (Math.min(g, upper) - lower) * rate;
+    lower = upper;
+  }
+  return round2(g - tax);
+}
+
+// Convert a future (nominal) amount into today's dollars given an annual
+// inflation rate (as a decimal, e.g. 0.025).
+export function toTodaysDollars(amount, years, inflationRate) {
+  const r = Number(inflationRate) || 0;
+  const y = Number(years) || 0;
+  return (Number(amount) || 0) / Math.pow(1 + r, y);
+}
+
 // The first calendar year the accumulating balance reaches `target` (or null if
 // it never does within `horizonYears`). Used to place a goal marker on the line
 // at the year it's actually achieved — earlier than the deadline if ahead.

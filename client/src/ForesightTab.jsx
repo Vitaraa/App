@@ -13,7 +13,9 @@ import {
 import { api } from "./api.js";
 import PageActions from "./PageActions.jsx";
 import { accountGroup, kindForGroup } from "./institutions.js";
-import { analyzePlan, simulateNetWorth, runsOutYear, mortgagePayment, compoundedSaving } from "./foresight.js";
+import { analyzePlan, simulateNetWorth, mortgagePayment, compoundedSaving, afterTaxIncome, toTodaysDollars } from "./foresight.js";
+
+const INFLATION = 0.025; // annual rate used to show projections in today's dollars
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -159,14 +161,16 @@ export default function ForesightTab({ txns = [] }) {
           if (startY > currentYear)
             houses.push({ year: startY, price: amt, downPayment: p.down_payment, loanRate: p.loan_rate ?? 5.5, loanTerm: p.loan_term ?? 25, appreciation: p.return_rate ?? 3, name: p.name });
           break;
-        case "job":
-          // A job is your primary income: what you invest from it is the salary
-          // minus your planned monthly spending (from the Budget tab) — not the
-          // whole paycheck. Subtracting `surplus` cancels the base saving the
-          // sim already applies, so the net monthly saving lands at amt/12 −
-          // plannedExpense.
-          flows.push({ start: startY, end: retirementYear || lifeYear, monthly: amt / 12 - plannedExpense - surplus });
+        case "job": {
+          // A job is your primary income. The entered salary is gross, so we
+          // estimate take-home after income tax, then what you invest is take-home
+          // minus planned monthly spending (from the Budget tab) — not the whole
+          // paycheck. Subtracting `surplus` cancels the base saving the sim already
+          // applies, so the net monthly saving lands at takeHome/12 − plannedExpense.
+          const takeHome = afterTaxIncome(amt);
+          flows.push({ start: startY, end: retirementYear || lifeYear, monthly: takeHome / 12 - plannedExpense - surplus });
           break;
+        }
         case "education": {
           const schoolInc = c.school_income != null && c.school_income !== "" ? Number(c.school_income) : monthlyIncome * 12;
           flows.push({ start: startY, end: endY, monthly: schoolInc / 12 - monthlyIncome - amt / 12 });
@@ -204,7 +208,11 @@ export default function ForesightTab({ txns = [] }) {
       flows,
       lumps,
     });
-    const data = series.map((p) => ({ year: p.year, NetWorth: p.value }));
+    // Discount each year to today's dollars so the projection reflects real
+    // purchasing power instead of inflated future figures. Targets the user
+    // enters (retirement amount, home price) are in today's dollars, so the
+    // markers and crossings below compare consistently.
+    const data = series.map((p) => ({ year: p.year, NetWorth: toTodaysDollars(p.value, p.year - currentYear, INFLATION) }));
     const valueAt = (yr) => {
       let v = data[0] ? data[0].NetWorth : 0;
       for (const p of data) {
@@ -241,8 +249,17 @@ export default function ForesightTab({ txns = [] }) {
       else status = "";
       return { id: p.id, name: p.name, x: startY, y: valueAt(startY), color: "var(--accent)", status };
     });
-    const ro = runsOutYear(series);
-    return { data, markers, xMax, ro, lineColor: ro ? "var(--red)" : "var(--green)", latest: data[data.length - 1]?.NetWorth || 0 };
+    // "Running out of money" only means depleting savings in retirement — so only
+    // flag a negative balance in a year AFTER the retirement year. A negative
+    // balance today (current debt) or before retirement isn't "running out".
+    const ro = retirementYear ? (series.find((p) => p.year > retirementYear && p.value < 0)?.year ?? null) : null;
+    // Colour the line by value: green where net worth is >= 0, red only where it
+    // dips below zero. Implemented as a vertical gradient split at the zero line.
+    const vals = data.map((d) => d.NetWorth);
+    const dataMax = Math.max(...vals, 0);
+    const dataMin = Math.min(...vals, 0);
+    const gradientOffset = dataMax <= 0 ? 0 : dataMin >= 0 ? 1 : dataMax / (dataMax - dataMin);
+    return { data, markers, xMax, ro, gradientOffset, latest: data[data.length - 1]?.NetWorth || 0 };
   }, [plans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
 
   const houseInfo = useMemo(() => {
@@ -438,7 +455,7 @@ export default function ForesightTab({ txns = [] }) {
             <section className="card chart-card">
               <div className="widget-head">
                 <div>
-                  <span className="muted">Net worth with all plans</span>
+                  <span className="muted">Net worth with all plans · today's dollars</span>
                   <div className="widget-value">{fmt(chart.latest)}<span className="muted unit"> by {chart.xMax}</span></div>
                 </div>
               </div>
@@ -447,12 +464,18 @@ export default function ForesightTab({ txns = [] }) {
               ) : (
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={chart.data} margin={{ top: 16, right: 20, left: 4, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="nwGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset={chart.gradientOffset} stopColor="var(--green)" />
+                        <stop offset={chart.gradientOffset} stopColor="var(--red)" />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="year" type="number" domain={[currentYear, chart.xMax]} allowDecimals={false} tickLine={false} axisLine={false} fontSize={12} />
                     <YAxis tickLine={false} axisLine={false} width={64} fontSize={12} tickFormatter={fmt} />
                     <Tooltip formatter={(v) => fmtc(v)} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }} />
                     <ReferenceLine y={0} stroke="var(--muted)" strokeWidth={1} />
-                    <Line type="monotone" dataKey="NetWorth" stroke={chart.lineColor} strokeWidth={2.5} dot={false} />
+                    <Line type="monotone" dataKey="NetWorth" stroke="url(#nwGradient)" strokeWidth={2.5} dot={false} />
                     {chart.markers.map((m) => (
                       <ReferenceDot key={m.id} x={m.x} y={m.y} r={6} fill={m.color} stroke="var(--card)" strokeWidth={2} ifOverflow="extendDomain" onClick={() => openEdit(m.id)} style={{ cursor: "pointer" }} />
                     ))}
@@ -464,7 +487,7 @@ export default function ForesightTab({ txns = [] }) {
                   <li key={m.id} className="legend-clickable" onClick={() => openEdit(m.id)} title="Edit plan"><span className="legend-dot" style={{ background: m.color }} /><strong>{m.name}</strong><span className="muted"> — {m.status}</span></li>
                 ))}
                 {chart.ro && (
-                  <li><span className="legend-dot" style={{ background: "var(--red)" }} /><span className="neg">Runs out of money in {chart.ro}</span><span className="muted"> — spending outpaces savings in retirement.</span></li>
+                  <li><span className="legend-dot" style={{ background: "var(--red)" }} /><span className="neg">Savings run out in {chart.ro}</span><span className="muted"> — after retirement, spending draws the balance below zero.</span></li>
                 )}
               </ul>
             </section>
