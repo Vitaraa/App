@@ -190,6 +190,10 @@ export function simulateNetWorth(o) {
   const lumpsByYear = {};
   for (const l of o.lumps || []) (lumpsByYear[l.year] ||= []).push(l);
   const flows = o.flows || [];
+  // Per-year surplus adjustment (annual $) from editable projected-budget tweaks.
+  // Lets a change to a budget cell move the net-worth line. Applied only while
+  // saving (pre-retirement); post-retirement cash flow is governed by drawdown.
+  const annualAdjust = o.annualAdjust || {};
 
   const end = Math.max(o.currentYear + 1, Number(o.lifeYear) || o.currentYear);
   const series = [{ year: o.currentYear, value: round2(liquid) }];
@@ -218,12 +222,14 @@ export function simulateNetWorth(o) {
       liquid = liquid * (1 + rInv);
       // After retirement there's no job income: base flow is just living-expense
       // drawdown. Pensions/other flows still apply on top via `flows`.
-      const base = o.retirementYear && y > o.retirementYear ? -retSpend : baseSurplus;
+      const retired = o.retirementYear && y > o.retirementYear;
+      const base = retired ? -retSpend : baseSurplus;
+      const adjust = retired ? 0 : (annualAdjust[y] || 0) / 12;
       let delta = 0;
       for (const f of flows) if (y >= f.start && y <= f.end) delta += f.monthly;
       let housingExtra = 0;
       for (const h of homes) housingExtra += h.housingDelta;
-      liquid += base + delta - housingExtra;
+      liquid += base + adjust + delta - housingExtra;
       for (const h of homes) {
         h.value = h.value * (1 + h.apprM);
         const interest = h.mortgage * (h.rate / 12);

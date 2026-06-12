@@ -254,6 +254,24 @@ export default function ForesightTab({ txns = [] }) {
       }
     }
     const xMax = Math.max(lifeYear, currentYear + 1, ...effectivePlans.map((p) => p.target_year || 0));
+    // Link the editable projected-budget cells to the line: for each year, sum how
+    // far the tweaked (override) category totals sit from their base. Income tweaks
+    // raise that year's surplus, expense tweaks lower it. Untouched cells net to 0,
+    // so the projection is unchanged until a cell is edited. Locked (plan-driven)
+    // rows aren't editable, so they never appear here — no double counting.
+    const annualAdjust = {};
+    for (let y = currentYear; y <= xMax; y++) {
+      let d = 0;
+      for (const b of incomeCats) {
+        const base = Number(b.amount || 0) * 12;
+        d += effBase(b.category, base, y) - base;
+      }
+      for (const b of expenseCats) {
+        const base = Number(b.amount || 0) * 12;
+        d -= effBase(b.category, base, y) - base;
+      }
+      if (d) annualAdjust[y] = d;
+    }
     const { series } = simulateNetWorth({
       startNetWorth: netWorth,
       surplus,
@@ -266,6 +284,7 @@ export default function ForesightTab({ txns = [] }) {
       houses,
       flows,
       lumps,
+      annualAdjust,
     });
     // Discount each year to today's dollars so the projection reflects real
     // purchasing power instead of inflated future figures. Targets the user
@@ -317,7 +336,7 @@ export default function ForesightTab({ txns = [] }) {
     const dataMin = Math.min(...vals, 0);
     const gradientOffset = dataMax <= 0 ? 0 : dataMin >= 0 ? 1 : dataMax / (dataMax - dataMin);
     return { data, markers, xMax, ro, gradientOffset, latest: data[data.length - 1]?.NetWorth || 0 };
-  }, [effectivePlans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome]);
+  }, [effectivePlans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome, overrides, incomeCats, expenseCats]);
 
   // Projected ANNUAL budget table. Plans map onto rows automatically:
   //  • a Job change drives your salary income row (take-home, locked from its year)
