@@ -194,6 +194,13 @@ export function simulateNetWorth(o) {
   // Lets a change to a budget cell move the net-worth line. Applied only while
   // saving (pre-retirement); post-retirement cash flow is governed by drawdown.
   const annualAdjust = o.annualAdjust || {};
+  // Table-driven mode: when the caller passes a per-year contribution map (the
+  // projected-budget net income for each year, already accounting for plans,
+  // retirement and overrides), use it as the cash flow so the line agrees with
+  // the budget table exactly. House down-payment + equity and one-time lumps are
+  // still layered on here because they aren't part of that table.
+  const annualContribution = o.annualContribution || null;
+  const tableDriven = !!annualContribution;
 
   const end = Math.max(o.currentYear + 1, Number(o.lifeYear) || o.currentYear);
   const series = [{ year: o.currentYear, value: round2(liquid) }];
@@ -213,23 +220,34 @@ export function simulateNetWorth(o) {
         rate: Number(h.loanRate ?? 5.5) / 100,
         apprM: Number(h.appreciation ?? 3) / 100 / 12,
         housingDelta: pay - housingCost, // extra monthly cost vs prior housing
+        inNetWorth: h.inNetWorth !== false, // count home equity in net worth?
       });
       housingCost = pay;
     }
     for (const l of lumpsByYear[y] || []) liquid += Number(l.amount) || 0;
 
     for (let m = 0; m < 12; m++) {
-      liquid = liquid * (1 + rInv);
-      // After retirement there's no job income: base flow is just living-expense
-      // drawdown. Pensions/other flows still apply on top via `flows`.
-      const retired = o.retirementYear && y > o.retirementYear;
-      const base = retired ? -retSpend : baseSurplus;
-      const adjust = retired ? 0 : (annualAdjust[y] || 0) / 12;
-      let delta = 0;
-      for (const f of flows) if (y >= f.start && y <= f.end) delta += f.monthly;
-      let housingExtra = 0;
-      for (const h of homes) housingExtra += h.housingDelta;
-      liquid += base + adjust + delta - housingExtra;
+      // Only invested (positive) balances earn the investment return. A negative
+      // balance is debt and must NOT compound at the investment rate — doing so
+      // produces a runaway debt spiral that contradicts the actual cash flow.
+      if (liquid > 0) liquid += liquid * rInv;
+      if (tableDriven) {
+        // Cash flow is the projected-budget net for this year (retirement and
+        // overrides already baked in by the caller). Mortgage payments are part
+        // of that net, so housingDelta is intentionally not applied here.
+        liquid += (annualContribution[y] || 0) / 12;
+      } else {
+        // After retirement there's no job income: base flow is just living-expense
+        // drawdown. Pensions/other flows still apply on top via `flows`.
+        const retired = o.retirementYear && y > o.retirementYear;
+        const base = retired ? -retSpend : baseSurplus;
+        const adjust = retired ? 0 : (annualAdjust[y] || 0) / 12;
+        let delta = 0;
+        for (const f of flows) if (y >= f.start && y <= f.end) delta += f.monthly;
+        let housingExtra = 0;
+        for (const h of homes) housingExtra += h.housingDelta;
+        liquid += base + adjust + delta - housingExtra;
+      }
       for (const h of homes) {
         h.value = h.value * (1 + h.apprM);
         const interest = h.mortgage * (h.rate / 12);
@@ -237,7 +255,7 @@ export function simulateNetWorth(o) {
         h.mortgage = Math.max(0, h.mortgage - principal);
       }
     }
-    const equity = homes.reduce((s, h) => s + (h.value - h.mortgage), 0);
+    const equity = homes.reduce((s, h) => s + (h.inNetWorth ? h.value - h.mortgage : 0), 0);
     series.push({ year: y, value: round2(liquid + equity) });
   }
   return { series };

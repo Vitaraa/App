@@ -202,6 +202,138 @@ export default function ForesightTab({ txns = [] }) {
   }, [editing, selectedId, plan?.kind]);
 
 
+  // Projected ANNUAL budget table. Plans map onto rows automatically:
+  //  • a Job change drives your salary income row (take-home, locked from its year)
+  //  • a House drives your housing expense row (mortgage, locked from purchase)
+  //  • Retirement zeroes only the salary row (other income & pensions continue)
+  //  • Pensions, other income/expense and education get their own locked rows
+  //  • a Child's cost is spread across grocery/health/insurance/etc. rows
+  // Everything else stays editable; tweaks carry forward. Defined before the chart
+  // because the net-worth line derives its yearly cash flow from this table's net.
+  const budgetTable = useMemo(() => {
+    if (!incomeCats.length && !expenseCats.length) return null;
+    const xMaxLocal = Math.max(lifeYear, currentYear + 1, ...effectivePlans.map((p) => p.target_year || 0));
+    const years = [];
+    for (let y = currentYear; y <= xMaxLocal; y++) years.push(y);
+    const retireY = retirementYear;
+
+    const job = effectivePlans.find((p) => p.kind === "job") || null;
+    const house = effectivePlans.find((p) => p.kind === "house" && (p.target_year || currentYear) > currentYear) || null;
+    const salaryCat = incomeCats.find((b) => /salar|wage|\bjob\b|employ|paycheck/i.test(b.category))?.category || incomeCats[0]?.category || null;
+    const housingCat = expenseCats.find((b) => /hous|rent|mortgag/i.test(b.category))?.category || null;
+
+    const houseAnnual = (y) => {
+      if (!house) return null;
+      const sY = house.target_year || currentYear;
+      if (y < sY) return null;
+      const price = Number(house.target_amount) || 0;
+      const down = house.down_payment != null && house.down_payment !== "" ? Number(house.down_payment) : price * 0.2;
+      const term = house.loan_term ?? 25;
+      return y < sY + term ? Math.round(mortgagePayment(Math.max(0, price - down), house.loan_rate ?? 5.5, term) * 12) : 0;
+    };
+    const jobAnnual = (y) => {
+      if (!job) return null;
+      const sY = job.target_year || currentYear;
+      return y < sY ? null : Math.round(afterTaxIncome(Number(job.target_amount) || 0));
+    };
+
+    // Spread each child's annual cost across matching expense categories; whatever
+    // can't be matched falls into a "Children" row.
+    const KID_W = { groceries: 3, food: 3, health: 1.5, education: 2, insurance: 1, clothing: 1, shopping: 1 };
+    const kidPlans = effectivePlans.filter((p) => p.kind === "kids");
+    const kidByYear = {};
+    for (const y of years) {
+      const byCat = {};
+      let leftover = 0;
+      for (const p of kidPlans) {
+        const c = parseConfig(p);
+        const sY = p.target_year || currentYear;
+        const eY = Number(c.end_year) || sY;
+        if (y < sY || y > eY) continue;
+        const cost = Number(p.target_amount) || 0;
+        const matched = expenseCats.map((b) => ({ cat: b.category, w: KID_W[b.category.toLowerCase()] || 0 })).filter((x) => x.w > 0);
+        const totalW = matched.reduce((s, x) => s + x.w, 0);
+        if (totalW > 0) for (const m of matched) byCat[m.cat] = (byCat[m.cat] || 0) + cost * (m.w / totalW);
+        else leftover += cost;
+      }
+      kidByYear[y] = { byCat, leftover };
+    }
+
+    // Income rows.
+    const incomeRows = incomeCats.map((b) => {
+      const baseAnnual = Number(b.amount || 0) * 12;
+      const cells = years.map((y) => {
+        if (b.category === salaryCat) {
+          if (retireY && y > retireY) return { year: y, value: 0, locked: true };
+          const j = jobAnnual(y);
+          if (j != null) return { year: y, value: j, locked: true };
+        }
+        return { year: y, value: Math.round(effBase(b.category, baseAnnual, y)), locked: false };
+      });
+      return { category: b.category, cells };
+    });
+    if (job && !salaryCat) {
+      incomeRows.push({ category: "Salary", cells: years.map((y) => (retireY && y > retireY ? { year: y, value: 0, locked: true } : { year: y, value: jobAnnual(y) ?? 0, locked: true })) });
+    }
+    for (const p of effectivePlans.filter((pp) => pp.kind === "pension")) {
+      const sY = p.target_year || currentYear;
+      const amt = Math.round(Number(p.target_amount) || 0);
+      incomeRows.push({ category: p.name || "Pension", cells: years.map((y) => ({ year: y, value: y >= sY ? amt : 0, locked: true })) });
+    }
+    for (const p of effectivePlans.filter((pp) => pp.kind === "income" && !parseConfig(pp).one_time)) {
+      const c = parseConfig(p);
+      const sY = p.target_year || currentYear;
+      const eY = Number(c.end_year) || sY;
+      const amt = Math.round(Number(p.target_amount) || 0);
+      incomeRows.push({ category: p.name || "Income", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
+    }
+
+    // Expense rows.
+    const expenseRows = expenseCats.map((b) => {
+      const baseAnnual = Number(b.amount || 0) * 12;
+      const cells = years.map((y) => {
+        let value = effBase(b.category, baseAnnual, y);
+        let locked = false;
+        if (b.category === housingCat) {
+          const h = houseAnnual(y);
+          if (h != null) { value = h; locked = true; }
+        }
+        const kidAdd = kidByYear[y].byCat[b.category] || 0;
+        if (kidAdd > 0) { value += kidAdd; locked = true; }
+        return { year: y, value: Math.round(value), locked };
+      });
+      return { category: b.category, cells };
+    });
+    if (house && !housingCat) {
+      expenseRows.push({ category: "Housing", cells: years.map((y) => ({ year: y, value: houseAnnual(y) ?? 0, locked: true })) });
+    }
+    for (const p of effectivePlans.filter((pp) => pp.kind === "expense" && !parseConfig(pp).one_time)) {
+      const c = parseConfig(p);
+      const sY = p.target_year || currentYear;
+      const eY = Number(c.end_year) || sY;
+      const amt = Math.round(Number(p.target_amount) || 0);
+      expenseRows.push({ category: p.name || "Expense", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
+    }
+    for (const p of effectivePlans.filter((pp) => pp.kind === "education")) {
+      const c = parseConfig(p);
+      const sY = p.target_year || currentYear;
+      const eY = Number(c.end_year) || sY;
+      const amt = Math.round(Number(p.target_amount) || 0);
+      expenseRows.push({ category: p.name || "Tuition", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
+    }
+    if (years.some((y) => kidByYear[y].leftover > 0)) {
+      expenseRows.push({ category: "Children", cells: years.map((y) => ({ year: y, value: Math.round(kidByYear[y].leftover || 0), locked: true })) });
+    }
+
+    const totals = years.map((y, i) => {
+      const income = incomeRows.reduce((s, r) => s + r.cells[i].value, 0);
+      const expense = expenseRows.reduce((s, r) => s + r.cells[i].value, 0);
+      return { year: y, income, expense, net: income - expense };
+    });
+    return { years, incomeRows, expenseRows, totals };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectivePlans, incomeCats, expenseCats, overrides, currentYear, lifeYear, retirementYear]);
+
   const chart = useMemo(() => {
     if (!effectivePlans.length) return null;
     const investReturn = effectivePlans.find((p) => p.kind === "retirement")?.return_rate ?? 7;
@@ -216,7 +348,7 @@ export default function ForesightTab({ txns = [] }) {
       switch (p.kind) {
         case "house":
           if (startY > currentYear)
-            houses.push({ year: startY, price: amt, downPayment: p.down_payment, loanRate: p.loan_rate ?? 5.5, loanTerm: p.loan_term ?? 25, appreciation: p.return_rate ?? 3, name: p.name });
+            houses.push({ year: startY, price: amt, downPayment: p.down_payment, loanRate: p.loan_rate ?? 5.5, loanTerm: p.loan_term ?? 25, appreciation: p.return_rate ?? 3, name: p.name, inNetWorth: c.include_in_net_worth !== false });
           break;
         case "job": {
           // A job is your primary income. The entered salary is gross, so estimate
@@ -272,6 +404,22 @@ export default function ForesightTab({ txns = [] }) {
       }
       if (d) annualAdjust[y] = d;
     }
+    // Drive the line from the projected-budget table so the two always agree.
+    // Each year's cash flow is that year's net (income − expense) before retirement;
+    // after retirement, table income (pensions/passive) minus retirement spending,
+    // which replaces working-life expenses. House down-payment/equity and one-time
+    // lumps are layered on inside the sim. Falls back to the flow model if there's
+    // no budget set up yet.
+    let annualContribution = null;
+    if (budgetTable && budgetTable.totals.length) {
+      annualContribution = {};
+      for (const t of budgetTable.totals) {
+        annualContribution[t.year] =
+          retirementYear && t.year > retirementYear
+            ? t.income - Math.round(retireSpending * 12)
+            : t.net;
+      }
+    }
     const { series } = simulateNetWorth({
       startNetWorth: netWorth,
       surplus,
@@ -285,6 +433,7 @@ export default function ForesightTab({ txns = [] }) {
       flows,
       lumps,
       annualAdjust,
+      annualContribution,
     });
     // Discount each year to today's dollars so the projection reflects real
     // purchasing power instead of inflated future figures. Targets the user
@@ -336,139 +485,7 @@ export default function ForesightTab({ txns = [] }) {
     const dataMin = Math.min(...vals, 0);
     const gradientOffset = dataMax <= 0 ? 0 : dataMin >= 0 ? 1 : dataMax / (dataMax - dataMin);
     return { data, markers, xMax, ro, gradientOffset, latest: data[data.length - 1]?.NetWorth || 0 };
-  }, [effectivePlans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome, overrides, incomeCats, expenseCats]);
-
-  // Projected ANNUAL budget table. Plans map onto rows automatically:
-  //  • a Job change drives your salary income row (take-home, locked from its year)
-  //  • a House drives your housing expense row (mortgage, locked from purchase)
-  //  • Retirement zeroes only the salary row (other income & pensions continue)
-  //  • Pensions, other income/expense and education get their own locked rows
-  //  • a Child's cost is spread across grocery/health/insurance/etc. rows
-  // Everything else stays editable; tweaks carry forward.
-  const budgetTable = useMemo(() => {
-    if (!incomeCats.length && !expenseCats.length) return null;
-    const xMaxLocal = Math.max(lifeYear, currentYear + 1, ...plans.map((p) => p.target_year || 0));
-    const years = [];
-    for (let y = currentYear; y <= xMaxLocal; y++) years.push(y);
-    const retireY = retirementYear;
-
-    const job = plans.find((p) => p.kind === "job") || null;
-    const house = plans.find((p) => p.kind === "house" && (p.target_year || currentYear) > currentYear) || null;
-    const salaryCat = incomeCats.find((b) => /salar|wage|\bjob\b|employ|paycheck/i.test(b.category))?.category || incomeCats[0]?.category || null;
-    const housingCat = expenseCats.find((b) => /hous|rent|mortgag/i.test(b.category))?.category || null;
-
-    const houseAnnual = (y) => {
-      if (!house) return null;
-      const sY = house.target_year || currentYear;
-      if (y < sY) return null;
-      const price = Number(house.target_amount) || 0;
-      const down = house.down_payment != null && house.down_payment !== "" ? Number(house.down_payment) : price * 0.2;
-      const term = house.loan_term ?? 25;
-      return y < sY + term ? Math.round(mortgagePayment(Math.max(0, price - down), house.loan_rate ?? 5.5, term) * 12) : 0;
-    };
-    const jobAnnual = (y) => {
-      if (!job) return null;
-      const sY = job.target_year || currentYear;
-      return y < sY ? null : Math.round(afterTaxIncome(Number(job.target_amount) || 0));
-    };
-
-    // Spread each child's annual cost across matching expense categories; whatever
-    // can't be matched falls into a "Children" row.
-    const KID_W = { groceries: 3, food: 3, health: 1.5, education: 2, insurance: 1, clothing: 1, shopping: 1 };
-    const kidPlans = plans.filter((p) => p.kind === "kids");
-    const kidByYear = {};
-    for (const y of years) {
-      const byCat = {};
-      let leftover = 0;
-      for (const p of kidPlans) {
-        const c = parseConfig(p);
-        const sY = p.target_year || currentYear;
-        const eY = Number(c.end_year) || sY;
-        if (y < sY || y > eY) continue;
-        const cost = Number(p.target_amount) || 0;
-        const matched = expenseCats.map((b) => ({ cat: b.category, w: KID_W[b.category.toLowerCase()] || 0 })).filter((x) => x.w > 0);
-        const totalW = matched.reduce((s, x) => s + x.w, 0);
-        if (totalW > 0) for (const m of matched) byCat[m.cat] = (byCat[m.cat] || 0) + cost * (m.w / totalW);
-        else leftover += cost;
-      }
-      kidByYear[y] = { byCat, leftover };
-    }
-
-    // Income rows.
-    const incomeRows = incomeCats.map((b) => {
-      const baseAnnual = Number(b.amount || 0) * 12;
-      const cells = years.map((y) => {
-        if (b.category === salaryCat) {
-          if (retireY && y > retireY) return { year: y, value: 0, locked: true };
-          const j = jobAnnual(y);
-          if (j != null) return { year: y, value: j, locked: true };
-        }
-        return { year: y, value: Math.round(effBase(b.category, baseAnnual, y)), locked: false };
-      });
-      return { category: b.category, cells };
-    });
-    if (job && !salaryCat) {
-      incomeRows.push({ category: "Salary", cells: years.map((y) => (retireY && y > retireY ? { year: y, value: 0, locked: true } : { year: y, value: jobAnnual(y) ?? 0, locked: true })) });
-    }
-    for (const p of plans.filter((pp) => pp.kind === "pension")) {
-      const sY = p.target_year || currentYear;
-      const amt = Math.round(Number(p.target_amount) || 0);
-      incomeRows.push({ category: p.name || "Pension", cells: years.map((y) => ({ year: y, value: y >= sY ? amt : 0, locked: true })) });
-    }
-    for (const p of plans.filter((pp) => pp.kind === "income" && !parseConfig(pp).one_time)) {
-      const c = parseConfig(p);
-      const sY = p.target_year || currentYear;
-      const eY = Number(c.end_year) || sY;
-      const amt = Math.round(Number(p.target_amount) || 0);
-      incomeRows.push({ category: p.name || "Income", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
-    }
-
-    // Expense rows.
-    const expenseRows = expenseCats.map((b) => {
-      const baseAnnual = Number(b.amount || 0) * 12;
-      const cells = years.map((y) => {
-        let value = effBase(b.category, baseAnnual, y);
-        let locked = false;
-        if (b.category === housingCat) {
-          const h = houseAnnual(y);
-          if (h != null) { value = h; locked = true; }
-        }
-        const kidAdd = kidByYear[y].byCat[b.category] || 0;
-        if (kidAdd > 0) { value += kidAdd; locked = true; }
-        return { year: y, value: Math.round(value), locked };
-      });
-      return { category: b.category, cells };
-    });
-    if (house && !housingCat) {
-      expenseRows.push({ category: "Housing", cells: years.map((y) => ({ year: y, value: houseAnnual(y) ?? 0, locked: true })) });
-    }
-    for (const p of plans.filter((pp) => pp.kind === "expense" && !parseConfig(pp).one_time)) {
-      const c = parseConfig(p);
-      const sY = p.target_year || currentYear;
-      const eY = Number(c.end_year) || sY;
-      const amt = Math.round(Number(p.target_amount) || 0);
-      expenseRows.push({ category: p.name || "Expense", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
-    }
-    for (const p of plans.filter((pp) => pp.kind === "education")) {
-      const c = parseConfig(p);
-      const sY = p.target_year || currentYear;
-      const eY = Number(c.end_year) || sY;
-      const amt = Math.round(Number(p.target_amount) || 0);
-      expenseRows.push({ category: p.name || "Tuition", cells: years.map((y) => ({ year: y, value: y >= sY && y <= eY ? amt : 0, locked: true })) });
-    }
-    if (years.some((y) => kidByYear[y].leftover > 0)) {
-      expenseRows.push({ category: "Children", cells: years.map((y) => ({ year: y, value: Math.round(kidByYear[y].leftover || 0), locked: true })) });
-    }
-
-    const totals = years.map((y, i) => {
-      const income = incomeRows.reduce((s, r) => s + r.cells[i].value, 0);
-      const expense = expenseRows.reduce((s, r) => s + r.cells[i].value, 0);
-      return { year: y, income, expense, net: income - expense };
-    });
-    return { years, incomeRows, expenseRows, totals };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plans, incomeCats, expenseCats, overrides, currentYear, lifeYear, retirementYear]);
-
+  }, [effectivePlans, netWorth, surplus, plannedExpense, currentYear, lifeYear, retireSpending, currentHousing, retirementYear, monthlyIncome, overrides, incomeCats, expenseCats, budgetTable]);
 
   // Sensible defaults for each plan type — shared by "New plan" and type-switch.
   const planDefaults = (kind) =>
@@ -591,6 +608,7 @@ export default function ForesightTab({ txns = [] }) {
             <label className="field"><span>Mortgage rate %</span><input type="number" step="0.1" defaultValue={v.loan_rate ?? ""} placeholder="5.5" key={kf("lr")} onBlur={(e) => onField("loan_rate", e.target.value)} /></label>
             <label className="field"><span>Mortgage term (yrs)</span><input type="number" defaultValue={v.loan_term ?? ""} placeholder="25" key={kf("lt")} onBlur={(e) => onField("loan_term", e.target.value)} /></label>
             <label className="field"><span>Appreciation % / yr</span><input type="number" step="0.1" defaultValue={v.return_rate} key={kf("r")} onBlur={(e) => onField("return_rate", e.target.value)} /></label>
+            <label className="field checkbox-field"><span>Include property in net worth</span><input type="checkbox" checked={c.include_in_net_worth !== false} onChange={(e) => onConfig("include_in_net_worth", e.target.checked)} /></label>
           </>
         )}
         {kind === "job" && (
