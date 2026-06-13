@@ -20,9 +20,17 @@ export function AuthProvider({ children }) {
     persist(token, username);
   }
 
-  async function register(u, p) {
-    const { token, username } = await api.register(u, p);
-    persist(token, username);
+  // Registration no longer logs you in: the account must be verified by email
+  // first. Returns the server result (e.g. { pending, email, emailSent }).
+  async function register(u, e, p) {
+    return api.register(u, e, p);
+  }
+
+  // Confirm an email-verification token; on success the server returns a session
+  // token so we sign the user straight in.
+  async function verifyEmail(token) {
+    const { token: jwtToken, username } = await api.verifyEmail(token);
+    persist(jwtToken, username);
   }
 
   function logout() {
@@ -32,7 +40,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ username, isAuthed, login, register, logout }}>
+    <AuthContext.Provider value={{ username, isAuthed, login, register, verifyEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );

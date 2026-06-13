@@ -10,11 +10,26 @@ db.pragma("journal_mode = WAL");
 // Users + their transactions. Each transaction belongs to one user.
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    username   TEXT UNIQUE NOT NULL,
-    password   TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    username       TEXT UNIQUE NOT NULL,
+    password       TEXT NOT NULL,
+    email          TEXT,
+    email_verified INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Short-lived tokens for email verification and password resets.
+  CREATE TABLE IF NOT EXISTS auth_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('verify','reset')),
+    token      TEXT UNIQUE NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_auth_tokens_token ON auth_tokens(token);
 
   CREATE TABLE IF NOT EXISTS transactions (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,6 +218,15 @@ if (!budgetCols.includes("type")) {
   // 'expense' (a spending limit) or 'income' (expected monthly income). Older
   // rows predate income budgeting, so they default to expense.
   addColumn("ALTER TABLE budgets ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'");
+}
+
+// Email + verification fields added to users for password resets / verification.
+// Existing accounts predate them; email stays NULL (grandfathered) and such
+// accounts continue to log in without verification.
+const userCols = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
+if (!userCols.includes("email")) addColumn("ALTER TABLE users ADD COLUMN email TEXT");
+if (!userCols.includes("email_verified")) {
+  addColumn("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0");
 }
 
 // House-plan fields added to plans after the Foresight launch.

@@ -151,6 +151,20 @@ select:focus {
   margin-top: 12px;
   text-align: center;
 }
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notice {
+  background: rgba(79, 124, 255, 0.12);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  margin-top: 10px;
+}
 
 /* ---- Dashboard ---- */
 .page {

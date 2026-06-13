@@ -21,15 +21,28 @@ async function request(path, { method = "GET", body } = {}) {
   });
 
   const data = res.status === 204 ? null : await res.json().catch(() => null);
-  if (!res.ok) throw new Error((data && data.error) || "Request failed");
+  if (!res.ok) {
+    const err = new Error((data && data.error) || "Request failed");
+    err.status = res.status;
+    if (data && data.code) err.code = data.code;
+    throw err;
+  }
   return data;
 }
 
 export const api = {
-  register: (username, password) =>
-    request("/auth/register", { method: "POST", body: { username, password } }),
+  register: (username, email, password) =>
+    request("/auth/register", { method: "POST", body: { username, email, password } }),
   login: (username, password) =>
     request("/auth/login", { method: "POST", body: { username, password } }),
+  verifyEmail: (token) =>
+    request("/auth/verify", { method: "POST", body: { token } }),
+  resendVerification: (username) =>
+    request("/auth/resend-verification", { method: "POST", body: { username } }),
+  forgotPassword: (email) =>
+    request("/auth/forgot-password", { method: "POST", body: { email } }),
+  resetPassword: (token, password) =>
+    request("/auth/reset-password", { method: "POST", body: { token, password } }),
   listTransactions: () => request("/transactions"),
   addTransaction: (tx) => request("/transactions", { method: "POST", body: tx }),
   updateTransaction: (id, patch) =>

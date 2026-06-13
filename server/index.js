@@ -2,11 +2,13 @@ import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import db from "./db.js";
+import { sendVerificationEmail, sendPasswordResetEmail } from "./email.js";
 import { categorize, merchantKey, normalizeDescription } from "./categorize.js";
 import { getQuotes, searchSymbols, getHistory } from "./quotes.js";
 
@@ -42,23 +44,76 @@ function auth(req, res, next) {
   }
 }
 
+// ---- Auth helpers (email verification + password reset) -----------------
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Base URL the action links point at. Prefer APP_URL; fall back to the request's
+// own origin (works for the single-server production setup).
+function appBaseUrl(req) {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+// Create a single-use token of the given kind for a user. ttlMs sets expiry.
+// Any existing tokens of the same kind for that user are cleared first.
+function createAuthToken(userId, kind, ttlMs) {
+  db.prepare("DELETE FROM auth_tokens WHERE user_id = ? AND kind = ?").run(userId, kind);
+  const token = crypto.randomBytes(32).toString("hex");
+  const expires = new Date(Date.now() + ttlMs).toISOString();
+  db.prepare(
+    "INSERT INTO auth_tokens (user_id, kind, token, expires_at) VALUES (?, ?, ?, ?)"
+  ).run(userId, kind, token, expires);
+  return token;
+}
+
+// Look up a valid (existing + unexpired) token of a kind; clears expired ones.
+function consumeAuthToken(token, kind) {
+  db.prepare("DELETE FROM auth_tokens WHERE expires_at < ?").run(new Date().toISOString());
+  const row = db
+    .prepare("SELECT * FROM auth_tokens WHERE token = ? AND kind = ?")
+    .get(token, kind);
+  return row || null;
+}
+
+async function issueVerification(req, user) {
+  const token = createAuthToken(user.id, "verify", 24 * 60 * 60 * 1000); // 24h
+  const link = `${appBaseUrl(req)}/verify?token=${token}`;
+  return sendVerificationEmail(user.email, link);
+}
+
 // ---- Auth routes --------------------------------------------------------
-app.post("/api/auth/register", (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password)
-    return res.status(400).json({ error: "Username and password are required" });
+app.post("/api/auth/register", async (req, res) => {
+  const { username, email, password } = req.body || {};
+  if (!username || !password || !email)
+    return res.status(400).json({ error: "Username, email and password are required" });
+  if (!EMAIL_RE.test(String(email)))
+    return res.status(400).json({ error: "Please enter a valid email address" });
   if (password.length < 6)
     return res.status(400).json({ error: "Password must be at least 6 characters" });
 
   const existing = db.prepare("SELECT id FROM users WHERE username = ?").get(username);
   if (existing) return res.status(409).json({ error: "Username already taken" });
+  const emailTaken = db
+    .prepare("SELECT id FROM users WHERE email = ? COLLATE NOCASE")
+    .get(email);
+  if (emailTaken) return res.status(409).json({ error: "That email is already registered" });
 
   const hash = bcrypt.hashSync(password, 10);
   const info = db
-    .prepare("INSERT INTO users (username, password) VALUES (?, ?)")
-    .run(username, hash);
-  const user = { id: info.lastInsertRowid, username };
-  res.status(201).json({ token: signToken(user), username });
+    .prepare("INSERT INTO users (username, password, email, email_verified) VALUES (?, ?, ?, 0)")
+    .run(username, hash, email);
+  const user = { id: info.lastInsertRowid, username, email };
+
+  const result = await issueVerification(req, user);
+  // Block-until-verified: don't return a session token. The client shows a
+  // "check your email" screen. If sending failed, surface a soft warning so the
+  // user can retry resending rather than being stuck.
+  res.status(201).json({
+    pending: true,
+    email,
+    emailSent: result.ok,
+    ...(result.ok ? {} : { warning: "Account created, but the verification email couldn't be sent. Try resending." }),
+  });
 });
 
 app.post("/api/auth/login", (req, res) => {
@@ -70,7 +125,75 @@ app.post("/api/auth/login", (req, res) => {
   if (!user || !bcrypt.compareSync(password, user.password))
     return res.status(401).json({ error: "Invalid username or password" });
 
+  // Grandfathered accounts (no email on file) skip verification. Accounts with
+  // an email must verify it before signing in.
+  if (user.email && !user.email_verified)
+    return res.status(403).json({ error: "Please verify your email before signing in", code: "unverified" });
+
   res.json({ token: signToken(user), username: user.username });
+});
+
+// Confirm an email-verification token. On success the account is marked verified
+// and we return a session token so the user is signed in immediately.
+app.post("/api/auth/verify", (req, res) => {
+  const { token } = req.body || {};
+  if (!token) return res.status(400).json({ error: "Missing token" });
+  const row = consumeAuthToken(token, "verify");
+  if (!row) return res.status(400).json({ error: "This verification link is invalid or has expired" });
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(row.user_id);
+  if (!user) return res.status(400).json({ error: "Account no longer exists" });
+
+  db.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").run(user.id);
+  db.prepare("DELETE FROM auth_tokens WHERE id = ?").run(row.id);
+  res.json({ token: signToken(user), username: user.username });
+});
+
+// Resend a verification email. Generic response so we don't reveal which
+// usernames/emails exist.
+app.post("/api/auth/resend-verification", async (req, res) => {
+  const { username } = req.body || {};
+  const user = username
+    ? db.prepare("SELECT * FROM users WHERE username = ?").get(username)
+    : null;
+  if (user && user.email && !user.email_verified) {
+    await issueVerification(req, user);
+  }
+  res.json({ ok: true });
+});
+
+// Start a password reset. Always responds ok (never leaks whether the email
+// is registered).
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const { email } = req.body || {};
+  if (email && EMAIL_RE.test(String(email))) {
+    const user = db.prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE").get(email);
+    if (user) {
+      const token = createAuthToken(user.id, "reset", 60 * 60 * 1000); // 1h
+      const link = `${appBaseUrl(req)}/reset?token=${token}`;
+      await sendPasswordResetEmail(user.email, link);
+    }
+  }
+  res.json({ ok: true });
+});
+
+// Complete a password reset. Proving email access also verifies the address.
+app.post("/api/auth/reset-password", (req, res) => {
+  const { token, password } = req.body || {};
+  if (!token || !password) return res.status(400).json({ error: "Missing token or password" });
+  if (password.length < 6)
+    return res.status(400).json({ error: "Password must be at least 6 characters" });
+
+  const row = consumeAuthToken(token, "reset");
+  if (!row) return res.status(400).json({ error: "This reset link is invalid or has expired" });
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(row.user_id);
+  if (!user) return res.status(400).json({ error: "Account no longer exists" });
+
+  const hash = bcrypt.hashSync(password, 10);
+  db.prepare("UPDATE users SET password = ?, email_verified = 1 WHERE id = ?").run(hash, user.id);
+  db.prepare("DELETE FROM auth_tokens WHERE id = ?").run(row.id);
+  res.json({ ok: true });
 });
 
 // ---- Transaction routes -------------------------------------------------
