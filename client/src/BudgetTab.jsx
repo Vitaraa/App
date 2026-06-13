@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
 import { categoryIcon } from "./institutions.js";
 import { fileToIcon } from "./imageIcon.js";
+import GoalsWidget from "./widgets/GoalsWidget.jsx";
 
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
@@ -265,6 +266,8 @@ export default function BudgetTab({ txns }) {
           </ul>
         )}
       </section>
+
+      <GoalsWidget />
     </div>
   );
 }

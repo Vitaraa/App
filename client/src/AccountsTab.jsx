@@ -24,10 +24,30 @@ const fmt0 = (n) =>
 const fmt = (n) =>
   Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
 
-// Window listing the transactions linked to one account.
-function AccountTxModal({ account, onClose }) {
+const TX_CATEGORIES = [
+  "Groceries", "Dining", "Transport", "Subscriptions", "Shopping",
+  "Utilities", "Housing", "Health", "Insurance", "Entertainment",
+  "Education", "Income", "Transfers", "Fees", "Other", "Uncategorized",
+];
+
+// Window listing — and managing — the transactions linked to one account.
+function AccountTxModal({ account, onClose, onChanged }) {
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [aType, setAType] = useState("expense");
+  const [aAmount, setAAmount] = useState("");
+  const [aCategory, setACategory] = useState("");
+  const [aDate, setADate] = useState("");
+
+  async function reloadList() {
+    try {
+      setTxns(await api.listAccountTransactions(account.id));
+    } catch {
+      setTxns([]);
+    }
+  }
   useEffect(() => {
     let live = true;
     api
@@ -45,35 +65,121 @@ function AccountTxModal({ account, onClose }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  async function addTx(e) {
+    e.preventDefault();
+    setError("");
+    const amt = Number(aAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setError("Enter a positive amount.");
+      return;
+    }
+    try {
+      await api.addTransaction({
+        type: aType,
+        amount: amt,
+        category: aCategory.trim() || (aType === "income" ? "Income" : "Other"),
+        date: aDate || undefined,
+        account_id: account.id,
+      });
+      setAAmount("");
+      setACategory("");
+      setADate("");
+      setAddOpen(false);
+      await reloadList();
+      onChanged?.();
+    } catch (err) {
+      setError(err.message || "Couldn't add transaction.");
+    }
+  }
+  async function removeTx(id) {
+    setError("");
+    try {
+      await api.deleteTransaction(id);
+      await reloadList();
+      onChanged?.();
+    } catch (err) {
+      setError(err.message || "Couldn't delete transaction.");
+    }
+  }
+
+  const count = txns.length;
+  const total = txns.reduce((s, t) => s + (t.type === "income" ? 1 : -1) * Number(t.amount || 0), 0);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div className="modal modal-wide acct-tx-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="modal-head">
-          <span className="modal-title">{account.name} · transactions</span>
+          <div className="acct-tx-title">
+            <span className="modal-title">{account.name}</span>
+            <span className="muted sm">
+              {typeLabel(account.type)}{account.last4 ? ` ··${account.last4}` : ""} · {fmt(acctValue(account))}
+            </span>
+          </div>
           <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
         </div>
-        {loading ? (
-          <p className="muted sm">Loading…</p>
-        ) : txns.length === 0 ? (
-          <p className="muted sm">
-            No transactions linked yet. Import a statement whose last 4 digits match this account
+
+        <div className="acct-tx-toolbar">
+          <span className="muted sm">
+            {loading ? "Loading…" : `${count} transaction${count === 1 ? "" : "s"}`}
+            {!loading && count > 0 && (
+              <span className={total >= 0 ? "pos" : "neg"}> · net {total >= 0 ? "+" : "−"}{fmt(Math.abs(total))}</span>
+            )}
+          </span>
+          <button className="btn ghost sm" onClick={() => { setAddOpen((v) => !v); setError(""); }}>
+            {addOpen ? "Cancel" : "+ Add transaction"}
+          </button>
+        </div>
+
+        {addOpen && (
+          <form className="acct-tx-add" onSubmit={addTx}>
+            <select value={aType} onChange={(e) => setAType(e.target.value)} aria-label="Type">
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+            </select>
+            <input
+              type="number" step="0.01" min="0" placeholder="Amount"
+              value={aAmount} onChange={(e) => setAAmount(e.target.value)} required
+            />
+            <select value={aCategory} onChange={(e) => setACategory(e.target.value)} aria-label="Category">
+              <option value="">Category…</option>
+              {TX_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <input type="date" value={aDate} onChange={(e) => setADate(e.target.value)} aria-label="Date" />
+            <button className="btn primary sm" type="submit">Add</button>
+          </form>
+        )}
+
+        {error && <div className="error sm">{error}</div>}
+
+        {loading ? null : count === 0 ? (
+          <p className="muted sm acct-tx-empty">
+            No transactions linked yet. Add one above, or import a statement whose last 4 digits match this account
             {account.last4 ? ` (${account.last4})` : ""}.
           </p>
         ) : (
-          <ul className="drill-list acct-tx-list">
-            {txns.map((t) => (
-              <li key={t.id}>
-                <span className="muted drill-date">{t.date}</span>
-                <span className="drill-name" title={t.description || t.category}>
-                  {t.description ? shortenMerchant(t.description) : t.category}
-                </span>
-                <span className="muted drill-cat">{t.category}</span>
-                <span className={t.type === "income" ? "pos" : "neg"}>
-                  {t.type === "income" ? "+" : "-"}{fmt(t.amount)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="acct-tx-scroll">
+            <table className="acct-tx-table">
+              <tbody>
+                {txns.map((t) => (
+                  <tr key={t.id}>
+                    <td className="muted nowrap acct-tx-date">{t.date}</td>
+                    <td className="acct-tx-name" title={t.description || t.category}>
+                      {t.description ? shortenMerchant(t.description) : t.category}
+                    </td>
+                    <td className="muted acct-tx-cat">{t.category}</td>
+                    <td className={`right nowrap ${t.type === "income" ? "pos" : "neg"}`}>
+                      {t.type === "income" ? "+" : "-"}{fmt(t.amount)}
+                    </td>
+                    <td className="right">
+                      <button className="x" title="Delete transaction" onClick={() => removeTx(t.id)}>×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
@@ -232,7 +338,7 @@ function AccountModal({ initial, onSubmit, onClose }) {
   );
 }
 
-export default function AccountsTab({ txns = [] }) {
+export default function AccountsTab({ txns = [], reload }) {
   const [accounts, setAccounts] = useState([]);
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null); // null | { initial }
@@ -442,7 +548,13 @@ export default function AccountsTab({ txns = [] }) {
       {modal && (
         <AccountModal initial={modal.initial} onSubmit={submitModal} onClose={() => setModal(null)} />
       )}
-      {txAccount && <AccountTxModal account={txAccount} onClose={() => setTxAccount(null)} />}
+      {txAccount && (
+        <AccountTxModal
+          account={txAccount}
+          onClose={() => setTxAccount(null)}
+          onChanged={() => { load(); reload?.(); }}
+        />
+      )}
     </div>
   );
 }

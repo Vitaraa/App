@@ -1058,12 +1058,72 @@ select:focus {
 .modal-wide {
   max-width: 560px;
 }
-.acct-tx-list {
-  max-height: 60vh;
+/* Account transaction window */
+.acct-tx-modal {
+  max-width: 620px;
 }
-/* match the Transactions tab order: date, name, category, amount */
-.acct-tx-list li {
-  grid-template-columns: auto 1fr auto auto;
+.acct-tx-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.acct-tx-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.acct-tx-add {
+  display: grid;
+  grid-template-columns: auto 1fr 1.2fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--input-bg);
+}
+.acct-tx-add select,
+.acct-tx-add input {
+  margin-top: 0;
+  width: 100%;
+  min-width: 0;
+}
+.acct-tx-empty {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+.acct-tx-scroll {
+  max-height: 56vh;
+  overflow-y: auto;
+  margin: 0 -4px;
+}
+.acct-tx-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.acct-tx-table td {
+  padding: 9px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.86rem;
+  vertical-align: middle;
+}
+.acct-tx-table tr:last-child td {
+  border-bottom: none;
+}
+.acct-tx-date {
+  font-size: 0.8rem;
+}
+.acct-tx-name {
+  font-weight: 500;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acct-tx-cat {
+  font-size: 0.8rem;
+  white-space: nowrap;
 }
 /* Account column in the Transactions table */
 .tx-table .acct-col {
@@ -1199,6 +1259,12 @@ select:focus {
 @media (max-width: 620px) {
   .holdings {
     padding-left: 8px;
+  }
+  .acct-tx-add {
+    grid-template-columns: 1fr 1fr;
+  }
+  .acct-tx-table .acct-tx-cat {
+    display: none;
   }
 }
 

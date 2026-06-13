@@ -148,7 +148,7 @@ export default function Dashboard() {
         {error && <div className="error">{error}</div>}
 
         {tab === "dashboard" && <Home txns={txns} reload={load} />}
-        {tab === "accounts" && <AccountsTab txns={txns} />}
+        {tab === "accounts" && <AccountsTab txns={txns} reload={load} />}
         {tab === "transactions" && <Transactions txns={txns} reload={load} />}
         {tab === "cashflow" && <CashFlowTab txns={txns} />}
         {tab === "budget" && <BudgetTab txns={txns} />}
