@@ -1,29 +1,39 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap");
+
+/* Warm "Espresso" dark theme — default. */
 :root {
-  --bg: #0f1115;
-  --card: #181b22;
-  --border: #262a33;
-  --text: #e7e9ee;
-  --muted: #8b909c;
-  --green: #34d399;
-  --red: #f87171;
-  --accent: #6366f1;
-  --input-bg: var(--input-bg);
-  --hover: rgba(255, 255, 255, 0.04);
-  --sidebar: #14171d;
+  --bg: #211c16;
+  --card: #2b2419;
+  --border: #3b3328;
+  --text: #f1e9da;
+  --muted: #a99a83;
+  --green: #7cba6f;
+  --red: #e08a64;
+  --accent: #c66a3c;
+  --accent-soft: rgba(198, 106, 60, 0.16);
+  --green-soft: rgba(124, 186, 111, 0.16);
+  --input-bg: #332b20;
+  --hover: rgba(255, 255, 255, 0.05);
+  --sidebar: #1b1610;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
 }
 
+/* Warm "Linen" light theme — matches the design mockup. */
 :root[data-theme="light"] {
-  --bg: #f4f6f9;
-  --card: #ffffff;
-  --border: #e2e6ee;
-  --text: #1a1d24;
-  --muted: #687184;
-  --green: #16a34a;
-  --red: #dc2626;
-  --accent: #6366f1;
-  --input-bg: #eef1f6;
+  --bg: #f4eee2;
+  --card: #fbf8f1;
+  --border: #e7ddca;
+  --text: #33291d;
+  --muted: #9b8b76;
+  --green: #4f8a52;
+  --red: #c2553a;
+  --accent: #b65a31;
+  --accent-soft: rgba(182, 90, 49, 0.12);
+  --green-soft: rgba(79, 138, 82, 0.14);
+  --input-bg: #ece3d3;
   --hover: rgba(0, 0, 0, 0.04);
-  --sidebar: #ffffff;
+  --sidebar: #f0e8d9;
 }
 
 * {
@@ -34,7 +44,22 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+}
+
+/* Serif display face for headings and headline numbers. */
+.side-brandname,
+.page-head h1,
+.brand,
+.widget-value,
+.stat strong,
+.networth-card strong,
+.contrib-amount,
+.kpi-value,
+.modal-title,
+.budget-section-title {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }
 
 .muted {
@@ -1566,16 +1591,135 @@ select:focus {
   justify-content: space-between;
   gap: 12px;
 }
+.page-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
 .page-head h1 {
   margin: 0;
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 1.7rem;
+  font-weight: 600;
   letter-spacing: -0.02em;
+}
+.page-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 .page-actions {
   display: flex;
   align-items: center;
+  gap: 10px;
+}
+
+/* ---- Dashboard: KPI cards + net-worth header ---- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.kpi-card {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+  padding: 20px;
+}
+.kpi-label {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+.kpi-value {
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1.05;
+}
+.kpi-delta {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.kpi-delta.pos {
+  color: var(--green);
+}
+.kpi-delta.neg {
+  color: var(--red);
+}
+.dash-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.nw-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nw-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.nw-eyebrow {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.nw-value {
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  margin-top: 2px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--green-soft);
+  color: var(--green);
+}
+.pill.neg {
+  background: var(--accent-soft);
+  color: var(--red);
+}
+.range-seg {
+  display: inline-flex;
+  background: var(--input-bg);
+  border-radius: 9px;
+  padding: 3px;
+  gap: 2px;
+}
+.range-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.range-btn.range-on {
+  background: var(--accent);
+  color: #fff;
+}
+@media (max-width: 620px) {
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Customize-widgets menu */

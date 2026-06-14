@@ -93,6 +93,12 @@ export default function Dashboard() {
       : current
       ? current[1]
       : "Claud";
+  const today = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  const subtitle = tab === "dashboard" ? `${today} • Here's where your money stands today.` : null;
 
   return (
     <div className="app-shell">
@@ -141,13 +147,16 @@ export default function Dashboard() {
 
       <main className="main">
         <header className="page-head">
-          <h1>{title}</h1>
+          <div className="page-titles">
+            <h1>{title}</h1>
+            {subtitle && <p className="page-sub">{subtitle}</p>}
+          </div>
           <div id="page-actions" className="page-actions" />
         </header>
 
         {error && <div className="error">{error}</div>}
 
-        {tab === "dashboard" && <Home txns={txns} reload={load} />}
+        {tab === "dashboard" && <Home txns={txns} reload={load} theme={theme} setTheme={setTheme} />}
         {tab === "accounts" && <AccountsTab txns={txns} reload={load} />}
         {tab === "transactions" && <Transactions txns={txns} reload={load} />}
         {tab === "cashflow" && <CashFlowTab txns={txns} />}
