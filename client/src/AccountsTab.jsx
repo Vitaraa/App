@@ -210,7 +210,7 @@ function AccountModal({ initial, onSubmit, onClose }) {
                   Upload
                   <input type="file" accept="image/*" style={{ display: "none" }} onChange={async (e) => {
                     const file = e.target.files?.[0];
-                    if (file) { try { setF((p) => ({ ...p, icon: await fileToIcon(file) })); } catch {} }
+                    if (file) { try { const icon = await fileToIcon(file); setF((p) => ({ ...p, icon })); } catch {} }
                     e.target.value = "";
                   }} />
                 </label>
