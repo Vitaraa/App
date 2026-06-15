@@ -4,25 +4,14 @@ import { ACCOUNT_TYPES, GROUPS, typeLabel, accountGroup, kindForGroup } from "./
 import AccountIcon from "./AccountIcon.jsx";
 import InvestmentHoldings from "./InvestmentHoldings.jsx";
 import { shortenMerchant } from "./merchant.js";
-import PageActions from "./PageActions.jsx";
-import GranularityTabs from "./widgets/GranularityTabs.jsx";
 import { netWorthSeries, accountsNetWorth } from "./timeseries.js";
 import { fileToIcon } from "./imageIcon.js";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
+import { Icon } from "./ds.jsx";
+import { NetWorthChart, fmt } from "./charts.jsx";
 
-const fmt0 = (n) =>
-  Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-
-const fmt = (n) =>
-  Number(n).toLocaleString(undefined, { style: "currency", currency: "USD" });
+// Net-worth value: server-computed `value` (investments price live) when
+// present, else the stored balance.
+const acctValue = (a) => (a.value != null ? Number(a.value) : Number(a.balance || 0));
 
 const TX_CATEGORIES = [
   "Groceries", "Dining", "Transport", "Subscriptions", "Shopping",
@@ -30,7 +19,14 @@ const TX_CATEGORIES = [
   "Education", "Income", "Transfers", "Fees", "Other", "Uncategorized",
 ];
 
-// Window listing — and managing — the transactions linked to one account.
+function AccountBadge({ type, icon }) {
+  if (icon) return <span className="acct-ico"><img src={icon} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 8 }} /></span>;
+  return <span className="acct-ico"><AccountIcon type={type} /></span>;
+}
+
+/* ============================================================
+   ACCOUNT TRANSACTIONS MODAL
+   ============================================================ */
 function AccountTxModal({ account, onClose, onChanged }) {
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,22 +38,16 @@ function AccountTxModal({ account, onClose, onChanged }) {
   const [aDate, setADate] = useState("");
 
   async function reloadList() {
-    try {
-      setTxns(await api.listAccountTransactions(account.id));
-    } catch {
-      setTxns([]);
-    }
+    try { setTxns(await api.listAccountTransactions(account.id)); }
+    catch { setTxns([]); }
   }
   useEffect(() => {
     let live = true;
-    api
-      .listAccountTransactions(account.id)
+    api.listAccountTransactions(account.id)
       .then((r) => live && setTxns(r))
       .catch(() => live && setTxns([]))
       .finally(() => live && setLoading(false));
-    return () => {
-      live = false;
-    };
+    return () => { live = false; };
   }, [account.id]);
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -69,60 +59,45 @@ function AccountTxModal({ account, onClose, onChanged }) {
     e.preventDefault();
     setError("");
     const amt = Number(aAmount);
-    if (!Number.isFinite(amt) || amt <= 0) {
-      setError("Enter a positive amount.");
-      return;
-    }
+    if (!Number.isFinite(amt) || amt <= 0) { setError("Enter a positive amount."); return; }
     try {
       await api.addTransaction({
-        type: aType,
-        amount: amt,
+        type: aType, amount: amt,
         category: aCategory.trim() || (aType === "income" ? "Income" : "Other"),
-        date: aDate || undefined,
-        account_id: account.id,
+        date: aDate || undefined, account_id: account.id,
       });
-      setAAmount("");
-      setACategory("");
-      setADate("");
-      setAddOpen(false);
+      setAAmount(""); setACategory(""); setADate(""); setAddOpen(false);
       await reloadList();
       onChanged?.();
-    } catch (err) {
-      setError(err.message || "Couldn't add transaction.");
-    }
+    } catch (err) { setError(err.message || "Couldn't add transaction."); }
   }
   async function removeTx(id) {
     setError("");
-    try {
-      await api.deleteTransaction(id);
-      await reloadList();
-      onChanged?.();
-    } catch (err) {
-      setError(err.message || "Couldn't delete transaction.");
-    }
+    try { await api.deleteTransaction(id); await reloadList(); onChanged?.(); }
+    catch (err) { setError(err.message || "Couldn't delete transaction."); }
   }
 
   const count = txns.length;
   const total = txns.reduce((s, t) => s + (t.type === "income" ? 1 : -1) * Number(t.amount || 0), 0);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-wide acct-tx-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <div className="modal-head">
-          <div className="acct-tx-title">
-            <span className="modal-title">{account.name}</span>
-            <span className="muted sm">
-              {typeLabel(account.type)}{account.last4 ? ` ··${account.last4}` : ""} · {fmt(acctValue(account))}
+    <div className="fs-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="fs-modal" style={{ maxWidth: 620 }} role="dialog" aria-modal="true">
+        <div className="fs-modal-head">
+          <div className="fs-modal-title" style={{ flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+            <span>{account.name}</span>
+            <span className="muted" style={{ fontSize: "var(--text-2xs)", textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>
+              {typeLabel(account.type)}{account.last4 ? ` ··${account.last4}` : ""} · {fmt(acctValue(account), 2)}
             </span>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
+          <button className="fs-modal-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
-        <div className="acct-tx-toolbar">
-          <span className="muted sm">
+        <div style={{ padding: "14px 20px 4px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <span className="muted" style={{ fontSize: "var(--text-xs)" }}>
             {loading ? "Loading…" : `${count} transaction${count === 1 ? "" : "s"}`}
             {!loading && count > 0 && (
-              <span className={total >= 0 ? "pos" : "neg"}> · net {total >= 0 ? "+" : "−"}{fmt(Math.abs(total))}</span>
+              <span className={total >= 0 ? "pos" : "neg"}> · net {total >= 0 ? "+" : "−"}{fmt(Math.abs(total), 2)}</span>
             )}
           </span>
           <button className="btn ghost sm" onClick={() => { setAddOpen((v) => !v); setError(""); }}>
@@ -131,81 +106,57 @@ function AccountTxModal({ account, onClose, onChanged }) {
         </div>
 
         {addOpen && (
-          <form className="acct-tx-add" onSubmit={addTx}>
-            <select value={aType} onChange={(e) => setAType(e.target.value)} aria-label="Type">
-              <option value="expense">Expense</option>
-              <option value="income">Income</option>
-            </select>
-            <input
-              type="number" step="0.01" min="0" placeholder="Amount"
-              value={aAmount} onChange={(e) => setAAmount(e.target.value)} required
-            />
-            <select value={aCategory} onChange={(e) => setACategory(e.target.value)} aria-label="Category">
-              <option value="">Category…</option>
-              {TX_CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <input type="date" value={aDate} onChange={(e) => setADate(e.target.value)} aria-label="Date" />
-            <button className="btn primary sm" type="submit">Add</button>
+          <form onSubmit={addTx} style={{ padding: "10px 20px" }}>
+            <div className="field-row" style={{ gridTemplateColumns: "auto 1fr 1fr auto auto", alignItems: "end", gap: 8 }}>
+              <select value={aType} onChange={(e) => setAType(e.target.value)} aria-label="Type" style={{ marginTop: 0 }}>
+                <option value="expense">Expense</option>
+                <option value="income">Income</option>
+              </select>
+              <input type="number" step="0.01" min="0" placeholder="Amount" value={aAmount} onChange={(e) => setAAmount(e.target.value)} required style={{ marginTop: 0 }} />
+              <select value={aCategory} onChange={(e) => setACategory(e.target.value)} aria-label="Category" style={{ marginTop: 0 }}>
+                <option value="">Category…</option>
+                {TX_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <input type="date" value={aDate} onChange={(e) => setADate(e.target.value)} aria-label="Date" style={{ marginTop: 0 }} />
+              <button className="btn primary sm" type="submit">Add</button>
+            </div>
           </form>
         )}
 
-        {error && <div className="error sm">{error}</div>}
+        {error && <div style={{ padding: "0 20px" }}><div className="error sm">{error}</div></div>}
 
-        {loading ? null : count === 0 ? (
-          <p className="muted sm acct-tx-empty">
-            No transactions linked yet. Add one above, or import a statement whose last 4 digits match this account
-            {account.last4 ? ` (${account.last4})` : ""}.
-          </p>
-        ) : (
-          <div className="acct-tx-scroll">
-            <table className="acct-tx-table">
-              <tbody>
-                {txns.map((t) => (
-                  <tr key={t.id}>
-                    <td className="muted nowrap acct-tx-date">{t.date}</td>
-                    <td className="acct-tx-name" title={t.description || t.category}>
-                      {t.description ? shortenMerchant(t.description) : t.category}
-                    </td>
-                    <td className="muted acct-tx-cat">{t.category}</td>
-                    <td className={`right nowrap ${t.type === "income" ? "pos" : "neg"}`}>
-                      {t.type === "income" ? "+" : "-"}{fmt(t.amount)}
-                    </td>
-                    <td className="right">
-                      <button className="x" title="Delete transaction" onClick={() => removeTx(t.id)}>×</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div style={{ padding: "8px 14px 18px" }}>
+          {loading ? null : count === 0 ? (
+            <p className="muted" style={{ fontSize: "var(--text-sm)", padding: "8px 6px", lineHeight: 1.5 }}>
+              No transactions linked yet. Add one above, or import a statement whose last 4 digits match this account
+              {account.last4 ? ` (${account.last4})` : ""}.
+            </p>
+          ) : (
+            <div className="txn-table" style={{ maxHeight: "56vh", overflowY: "auto" }}>
+              {txns.map((t) => (
+                <div className="trow" key={t.id}>
+                  <span className="trow-ico"><Icon name={t.type === "income" ? "income" : "expense"} /></span>
+                  <div className="trow-main">
+                    <span className="trow-name">{t.description ? shortenMerchant(t.description) : t.category}</span>
+                    <div className="trow-tags"><span className="muted" style={{ fontSize: "var(--text-2xs)" }}>{t.category} · {t.date}</span></div>
+                  </div>
+                  <span className={"trow-amt " + (t.type === "income" ? "pos" : "")}>
+                    {t.type === "income" ? "+" : "−"}{fmt(t.amount, 2)}
+                  </span>
+                  <button className="trow-del" title="Delete transaction" onClick={() => removeTx(t.id)}><Icon name="trash" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-// Net-worth value: server-computed `value` (investments price live) when
-// present, else the stored balance.
-const acctValue = (a) => (a.value != null ? Number(a.value) : Number(a.balance || 0));
-
-function Badge({ type, icon }) {
-  if (icon) {
-    return (
-      <span className="acct-badge has-img">
-        <img src={icon} alt="" />
-      </span>
-    );
-  }
-  return (
-    <span className="acct-badge">
-      <AccountIcon type={type} />
-    </span>
-  );
-}
-
-// Add / edit account in a centered modal.
+/* ============================================================
+   ADD / EDIT ACCOUNT MODAL
+   ============================================================ */
 function AccountModal({ initial, onSubmit, onClose }) {
   const [f, setF] = useState(initial);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -221,116 +172,82 @@ function AccountModal({ initial, onSubmit, onClose }) {
   }, [onClose]);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <div className="modal-head">
-          <span className="modal-title">{editing ? "Edit account" : "Add account"}</span>
-          <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
+    <div className="fs-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="fs-modal" role="dialog" aria-modal="true">
+        <div className="fs-modal-head">
+          <div className="fs-modal-title"><Icon name="bank" style={{ width: 20, height: 20 }} />{editing ? "Edit account" : "Add account"}</div>
+          <button className="fs-modal-close" onClick={onClose} aria-label="Close">×</button>
         </div>
-        <form
-          className="modal-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!valid) return;
-            onSubmit({
-              name: f.name.trim(),
-              type: f.type,
-              institution: f.institution,
-              balance: isInvestment ? 0 : Number(f.balance) || 0,
-              group: isOther ? f.group : undefined,
-              last4: f.last4 || "",
-              icon: f.icon || "",
-            });
-          }}
-        >
-          <div className="field">
-            <label>Name</label>
-            <input value={f.name} onChange={set("name")} autoFocus placeholder="e.g. Everyday Chequing" />
-          </div>
-          <div className="field">
-            <label>Type</label>
-            <select value={f.type} onChange={set("type")}>
-              {ACCOUNT_TYPES.map((t) => (
-                <option key={t.key} value={t.key}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Icon</label>
-            <div className="icon-field">
-              {f.icon ? (
-                <span className="acct-badge has-img icon-preview"><img src={f.icon} alt="" /></span>
-              ) : (
-                <span className="acct-badge icon-preview">
-                  <AccountIcon type={f.type} />
-                </span>
-              )}
-              <label className="btn ghost sm icon-upload">
-                Upload
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      try {
-                        const icon = await fileToIcon(file);
-                        setF((prev) => ({ ...prev, icon }));
-                      } catch {
-                        /* ignore */
-                      }
-                    }
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-              {f.icon && (
-                <button type="button" className="link sm" onClick={() => setF((prev) => ({ ...prev, icon: "" }))}>
-                  Remove
-                </button>
-              )}
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          if (!valid) return;
+          onSubmit({
+            name: f.name.trim(), type: f.type, institution: f.institution,
+            balance: isInvestment ? 0 : Number(f.balance) || 0,
+            group: isOther ? f.group : undefined,
+            last4: f.last4 || "", icon: f.icon || "",
+          });
+        }}>
+          <div className="fs-grid">
+            <div className="fs-field">
+              <span>Name</span>
+              <input value={f.name} onChange={set("name")} autoFocus placeholder="e.g. Everyday Chequing" />
             </div>
-          </div>
-
-          {isOther && (
-            <div className="field">
-              <label>Which group does it belong to?</label>
-              <select value={f.group} onChange={set("group")}>
-                <option value="">Select a group…</option>
-                {GROUPS.map((g) => (
-                  <option key={g.key} value={g.key}>
-                    {g.label} ({g.kind === "asset" ? "asset" : "liability"})
-                  </option>
-                ))}
+            <div className="fs-field">
+              <span>Type</span>
+              <select value={f.type} onChange={set("type")}>
+                {ACCOUNT_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
               </select>
             </div>
-          )}
-          {isInvestment ? (
-            <p className="muted form-note">Add stock holdings after creating.</p>
-          ) : (
-            <div className="field-row">
-              <div className="field">
-                <label>Starting balance</label>
-                <input type="number" step="0.01" value={f.balance} onChange={set("balance")} placeholder="0.00" />
-              </div>
-              <div className="field">
-                <label>Last 4 digits</label>
-                <input
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={f.last4}
-                  onChange={set("last4")}
-                  placeholder="e.g. 2739"
-                />
+
+            <div className="fs-field full">
+              <span>Icon</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {f.icon
+                  ? <span className="acct-ico" style={{ width: 44, height: 44 }}><img src={f.icon} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /></span>
+                  : <span className="acct-ico" style={{ width: 44, height: 44 }}><AccountIcon type={f.type} /></span>}
+                <label className="btn ghost sm" style={{ cursor: "pointer" }}>
+                  Upload
+                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) { try { setF((p) => ({ ...p, icon: await fileToIcon(file) })); } catch {} }
+                    e.target.value = "";
+                  }} />
+                </label>
+                {f.icon && <button type="button" className="link sm" onClick={() => setF((p) => ({ ...p, icon: "" }))}>Remove</button>}
               </div>
             </div>
-          )}
-          <div className="modal-actions">
-            <button className="btn ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn primary" type="submit" disabled={!valid}>
-              {editing ? "Save" : "Add account"}
-            </button>
+
+            {isOther && (
+              <div className="fs-field full">
+                <span>Which group does it belong to?</span>
+                <select value={f.group} onChange={set("group")}>
+                  <option value="">Select a group…</option>
+                  {GROUPS.map((g) => <option key={g.key} value={g.key}>{g.label} ({g.kind === "asset" ? "asset" : "liability"})</option>)}
+                </select>
+              </div>
+            )}
+
+            {isInvestment ? (
+              <div className="fs-field full"><p className="muted" style={{ fontSize: "var(--text-xs)" }}>Add stock holdings after creating.</p></div>
+            ) : (
+              <>
+                <div className="fs-field">
+                  <span>Starting balance</span>
+                  <input type="number" step="0.01" value={f.balance} onChange={set("balance")} placeholder="0.00" />
+                </div>
+                <div className="fs-field">
+                  <span>Last 4 digits</span>
+                  <input inputMode="numeric" maxLength={4} value={f.last4} onChange={set("last4")} placeholder="e.g. 2739" />
+                </div>
+              </>
+            )}
+          </div>
+          <div className="fs-modal-foot">
+            <button className="btn ghost sm" type="button" onClick={onClose}>Cancel</button>
+            <div className="right">
+              <button className="btn primary sm" type="submit" disabled={!valid}>{editing ? "Save" : "Add account"}</button>
+            </div>
           </div>
         </form>
       </div>
@@ -338,65 +255,59 @@ function AccountModal({ initial, onSubmit, onClose }) {
   );
 }
 
+/* ============================================================
+   ACCOUNTS PAGE
+   ============================================================ */
+const ACCT_ICON = {
+  chequing: "bank", savings: "piggy", cash: "wallet", investment: "chart",
+  credit_card: "card", mortgage: "home", line_of_credit: "card",
+  student_loan: "file", auto_loan: "card", other: "wallet",
+};
+
 export default function AccountsTab({ txns = [], reload }) {
   const [accounts, setAccounts] = useState([]);
   const [error, setError] = useState("");
-  const [modal, setModal] = useState(null); // null | { initial }
+  const [modal, setModal] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
-  const [txAccount, setTxAccount] = useState(null); // account whose txns window is open
-  const [gran, setGran] = useState("month");
+  const [txAccount, setTxAccount] = useState(null);
 
   async function load() {
-    try {
-      setAccounts(await api.listAccounts());
-    } catch (e) {
-      setError(e.message);
-    }
+    try { setAccounts(await api.listAccounts()); }
+    catch (e) { setError(e.message); }
   }
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
   const netWorth = useMemo(
-    () =>
-      accounts.reduce((s, a) => {
-        const v = acctValue(a);
-        return s + (kindForGroup(accountGroup(a)) === "liability" ? -v : v);
-      }, 0),
+    () => accounts.reduce((s, a) => {
+      const v = acctValue(a);
+      return s + (kindForGroup(accountGroup(a)) === "liability" ? -v : v);
+    }, 0),
     [accounts]
   );
 
-  // Assets vs debt totals + per-group subtotals for the summary panel.
   const summary = useMemo(() => {
-    const byGroup = {};
-    let assets = 0;
-    let debt = 0;
+    let assets = 0, debt = 0;
     for (const a of accounts) {
-      const g = accountGroup(a);
       const v = acctValue(a);
-      byGroup[g] = (byGroup[g] || 0) + v;
-      if (kindForGroup(g) === "liability") debt += v;
+      if (kindForGroup(accountGroup(a)) === "liability") debt += v;
       else assets += v;
     }
-    return { assets, debt, byGroup };
+    return { assets, debt };
   }, [accounts]);
 
-  // Net worth over time (cumulative from transactions, anchored to current accounts).
   const nwSeries = useMemo(
-    () => netWorthSeries(txns || [], gran, accountsNetWorth(accounts)),
-    [txns, gran, accounts]
+    () => netWorthSeries(txns || [], "month", accountsNetWorth(accounts)),
+    [txns, accounts]
   );
 
   function openAdd() {
     setModal({ initial: { name: "", type: "chequing", institution: "other", balance: "", group: "", last4: "", icon: "" } });
   }
   function openEdit(a) {
-    setModal({
-      initial: {
-        id: a.id, name: a.name, type: a.type, institution: a.institution,
-        balance: a.balance, group: accountGroup(a), last4: a.last4 || "", icon: a.icon || "",
-      },
-    });
+    setModal({ initial: {
+      id: a.id, name: a.name, type: a.type, institution: a.institution,
+      balance: a.balance, group: accountGroup(a), last4: a.last4 || "", icon: a.icon || "",
+    } });
   }
   async function submitModal(data) {
     try {
@@ -404,157 +315,138 @@ export default function AccountsTab({ txns = [], reload }) {
       else await api.addAccount(data);
       setModal(null);
       load();
-    } catch (e) {
-      setError(e.message);
-    }
+    } catch (e) { setError(e.message); }
   }
-  async function remove(id) {
-    await api.deleteAccount(id);
-    load();
-  }
+  async function remove(id) { await api.deleteAccount(id); load(); }
 
-  function renderAccount(a) {
+  const creditCount = accounts.filter((a) => kindForGroup(accountGroup(a)) === "liability").length;
+
+  function renderRow(a) {
+    const icon = ACCT_ICON[a.type] ?? "bank";
     if (a.type === "investment") {
       const growth = Number(a.growth || 0);
       const cost = Number(a.cost || 0);
       const growthPct = cost > 0 ? (growth / cost) * 100 : 0;
       const open = expandedId === a.id;
       return (
-        <div key={a.id} className="acct-block">
-          <div className="acct-item acct-invest">
-            <Badge type={a.type} icon={a.icon} />
-            <div className="acct-info">
-              <span className="acct-itemname">{a.name}</span>
-              <button className="link sm acct-type" onClick={() => setExpandedId(open ? null : a.id)}>
+        <div key={a.id}>
+          <div className="acct-row">
+            <AccountBadge type={a.type} icon={a.icon} />
+            <div className="acct-row-body">
+              <span className="acct-row-name">{a.name}</span>
+              <button className="link sm" onClick={() => setExpandedId(open ? null : a.id)} style={{ textAlign: "left" }}>
                 {a.holdingsCount || 0} holding{(a.holdingsCount || 0) === 1 ? "" : "s"} {open ? "▲" : "▼"}
               </button>
             </div>
-            <div className="acct-invest-val">
-              <span className="acct-itemname">{fmt(acctValue(a))}</span>
-              <span className={`hd-sub ${growth >= 0 ? "pos" : "neg"}`}>
-                {growth >= 0 ? "+" : ""}{fmt(growth)} ({growthPct >= 0 ? "+" : ""}{growthPct.toFixed(1)}%)
+            <div className="acct-row-right">
+              <span className="acct-row-bal">{fmt(acctValue(a), 2)}</span>
+              <span className={"acct-row-chg " + (growth >= 0 ? "pos" : "neg")}>
+                {growth >= 0 ? "+" : ""}{fmt(growth, 0)} ({growthPct >= 0 ? "+" : ""}{growthPct.toFixed(1)}%)
               </span>
             </div>
-            <button className="link sm" onClick={() => openEdit(a)}>Edit</button>
-            <button className="x" title="Delete" onClick={() => remove(a.id)}>×</button>
+            <div className="acct-row-acts">
+              <button className="acct-act-btn" title="Edit" onClick={() => openEdit(a)}><Icon name="pencil" /></button>
+              <button className="acct-act-btn del" title="Delete" onClick={() => remove(a.id)}><Icon name="trash" /></button>
+            </div>
           </div>
-          {open && <InvestmentHoldings accountId={a.id} onChange={load} />}
+          {open && <div style={{ padding: "4px 6px 14px 52px" }}><InvestmentHoldings accountId={a.id} onChange={load} /></div>}
         </div>
       );
     }
     return (
-      <div
-        key={a.id}
-        className="acct-item acct-clickable"
+      <div className="acct-row clickable" key={a.id} role="button" tabIndex={0}
         onClick={() => setTxAccount(a)}
-        title="View transactions"
-      >
-        <Badge type={a.type} icon={a.icon} />
-        <div className="acct-info">
-          <span className="acct-itemname">{a.name}</span>
-          <span className="acct-type muted">
-            {typeLabel(a.type)}{a.last4 ? ` ··${a.last4}` : ""}
-          </span>
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTxAccount(a); } }}>
+        <AccountBadge type={a.type} icon={a.icon} />
+        <div className="acct-row-body">
+          <span className="acct-row-name">{a.name}</span>
+          <span className="acct-row-meta">{typeLabel(a.type)}{a.last4 ? ` ···· ${a.last4}` : ""}</span>
         </div>
-        <span className="acct-itemval">{fmt(acctValue(a))}</span>
-        <button className="link sm" onClick={(e) => { e.stopPropagation(); openEdit(a); }}>Edit</button>
-        <button className="x" title="Delete" onClick={(e) => { e.stopPropagation(); remove(a.id); }}>×</button>
+        <div className="acct-row-right">
+          <span className={"acct-row-bal " + (acctValue(a) < 0 ? "neg" : "")}>{fmt(acctValue(a), 2)}</span>
+        </div>
+        <div className="acct-row-acts" onClick={(e) => e.stopPropagation()}>
+          <button className="acct-act-btn" title="Edit" onClick={() => openEdit(a)}><Icon name="pencil" /></button>
+          <button className="acct-act-btn del" title="Delete" onClick={() => remove(a.id)}><Icon name="trash" /></button>
+        </div>
+        <span className="acct-chev"><Icon name="chevR" /></span>
       </div>
-    );
-  }
-
-  function renderGroup(g) {
-    const list = accounts.filter((a) => accountGroup(a) === g.key);
-    const total = list.reduce((s, a) => s + acctValue(a), 0);
-    return (
-      <section className="card acct-group" key={g.key}>
-        <div className="acct-group-head">
-          <span className="muted">{g.label}</span>
-          <strong className={g.kind === "liability" ? "neg" : "pos"}>
-            {g.kind === "liability" && total !== 0 ? "−" : ""}{fmt(total)}
-          </strong>
-        </div>
-        {list.length === 0 ? <p className="muted empty sm">None yet.</p> : list.map(renderAccount)}
-      </section>
     );
   }
 
   return (
-    <div className="accounts-tab">
-      <PageActions>
-        <button className="btn primary sm" onClick={openAdd}>+ Add account</button>
-      </PageActions>
+    <>
+      <div className="page-head">
+        <div>
+          <h1>Accounts</h1>
+          <p className="page-sub">{accounts.length} account{accounts.length === 1 ? "" : "s"} · net worth {fmt(netWorth)}</p>
+        </div>
+        <div className="head-actions">
+          <button className="btn primary sm" onClick={openAdd}><Icon name="plus" style={{ width: 15, height: 15 }} />Add account</button>
+        </div>
+      </div>
 
       {error && <div className="error">{error}</div>}
 
-      <section className="card chart-card nw-chart">
-        <div className="widget-head">
-          <div>
-            <span className="muted">Net worth</span>
-            <div className={`widget-value ${netWorth >= 0 ? "pos" : "neg"}`}>{fmt(netWorth)}</div>
+      {/* KPI strip */}
+      <div className="card">
+        <div className="kpi-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+          <div className="kpi">
+            <span className="kpi-label">Total assets</span>
+            <span className="kpi-val">{fmt(summary.assets, 2)}</span>
           </div>
-          <GranularityTabs value={gran} onChange={setGran} />
+          <div className="kpi">
+            <span className="kpi-label">Total liabilities</span>
+            <span className="kpi-val neg">{fmt(summary.debt, 2)}</span>
+            <span className="kpi-delta muted">{creditCount} credit account{creditCount === 1 ? "" : "s"}</span>
+          </div>
+          <div className="kpi">
+            <span className="kpi-label">Net worth</span>
+            <span className={"kpi-val " + (netWorth >= 0 ? "" : "neg")}>{fmt(netWorth, 2)}</span>
+          </div>
         </div>
-        {nwSeries.length === 0 ? (
-          <p className="muted empty">Add transactions to see net worth over time.</p>
-        ) : (
-          <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={nwSeries} margin={{ top: 12, right: 8, left: -8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} minTickGap={20} />
-              <YAxis tickLine={false} axisLine={false} width={52} fontSize={12} tickFormatter={fmt0} />
-              <Tooltip
-                formatter={(v) => [fmt(v), "Net worth"]}
-                contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8 }}
-              />
-              <Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2.5} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </section>
-
-      <div className="acct-layout">
-        <div className="acct-left">{GROUPS.map(renderGroup)}</div>
-
-        <aside className="acct-summary card">
-          <span className="muted">Summary</span>
-          <div className="summary-row total">
-            <span>Assets</span>
-            <strong className="pos">{fmt(summary.assets)}</strong>
-          </div>
-          {GROUPS.filter((g) => g.kind === "asset").map((g) => (
-            <div key={g.key} className="summary-row sub">
-              <span className="muted">{g.label}</span>
-              <span>{fmt(summary.byGroup[g.key] || 0)}</span>
-            </div>
-          ))}
-          <div className="summary-row total">
-            <span>Debt</span>
-            <strong className="neg">{fmt(summary.debt)}</strong>
-          </div>
-          {GROUPS.filter((g) => g.kind === "liability").map((g) => (
-            <div key={g.key} className="summary-row sub">
-              <span className="muted">{g.label}</span>
-              <span>{fmt(summary.byGroup[g.key] || 0)}</span>
-            </div>
-          ))}
-          <div className="summary-row net">
-            <span>Net worth</span>
-            <strong className={netWorth >= 0 ? "pos" : "neg"}>{fmt(netWorth)}</strong>
-          </div>
-        </aside>
       </div>
 
-      {modal && (
-        <AccountModal initial={modal.initial} onSubmit={submitModal} onClose={() => setModal(null)} />
+      {/* Net worth chart */}
+      {nwSeries.length > 1 && (
+        <div className="card widget">
+          <div className="widget-head"><span className="widget-title">Net worth over time</span></div>
+          <NetWorthChart data={nwSeries.map((s) => s.value)} labels={nwSeries.map((s) => s.label)} gradId="acctNwFill" lineId="acctNwLine" />
+        </div>
       )}
-      {txAccount && (
-        <AccountTxModal
-          account={txAccount}
-          onClose={() => setTxAccount(null)}
-          onChanged={() => { load(); reload?.(); }}
-        />
+
+      {/* Account groups */}
+      {accounts.length === 0 ? (
+        <div className="placeholder">
+          <Icon name="bank" className="ph-ico" />
+          <h2>No accounts yet</h2>
+          <p>Add an account to start tracking your net worth.</p>
+          <button className="btn primary sm" onClick={openAdd} style={{ marginTop: 8 }}>
+            <Icon name="plus" style={{ width: 15, height: 15 }} />Add account
+          </button>
+        </div>
+      ) : (
+        GROUPS.map((g) => {
+          const list = accounts.filter((a) => accountGroup(a) === g.key);
+          if (list.length === 0) return null;
+          const sub = list.reduce((s, a) => s + acctValue(a), 0);
+          return (
+            <div className="card widget" key={g.key}>
+              <div className="widget-head">
+                <span className="widget-title">{g.label}</span>
+                <span className="group-sub muted">
+                  {list.length} account{list.length === 1 ? "" : "s"}{" "}
+                  <b className={g.kind === "liability" ? "neg" : ""}>{g.kind === "liability" && sub !== 0 ? "−" : ""}{fmt(sub, 2)}</b>
+                </span>
+              </div>
+              <div className="acct-rows">{list.map(renderRow)}</div>
+            </div>
+          );
+        })
       )}
-    </div>
+
+      {modal && <AccountModal initial={modal.initial} onSubmit={submitModal} onClose={() => setModal(null)} />}
+      {txAccount && <AccountTxModal account={txAccount} onClose={() => setTxAccount(null)} onChanged={() => { load(); reload?.(); }} />}
+    </>
   );
 }

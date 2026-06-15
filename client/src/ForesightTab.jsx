@@ -11,9 +11,9 @@ import {
   ReferenceLine,
 } from "recharts";
 import { api } from "./api.js";
-import PageActions from "./PageActions.jsx";
 import { accountGroup, kindForGroup } from "./institutions.js";
 import { simulateNetWorth, mortgagePayment, afterTaxIncome, toTodaysDollars } from "./foresight.js";
+import { Icon } from "./ds.jsx";
 
 const INFLATION = 0.025; // annual rate used to show projections in today's dollars
 
@@ -676,20 +676,28 @@ export default function ForesightTab({ txns = [] }) {
 
   return (
     <div className="foresight-tab">
-      <PageActions>
-        <div className="new-plan-dd">
-          <button className="btn primary sm" onClick={() => setMenuOpen((v) => !v)}>+ New plan ▾</button>
-          {menuOpen && (
-            <div className="new-plan-menu">
-              {KINDS.map((x) => (
-                <button key={x.key} className="new-plan-menu-item" onClick={() => openCreate(x.key)}>
-                  <span className="legend-ico" aria-hidden="true">{planIcon(x.key)}</span>{x.label}
-                </button>
-              ))}
-            </div>
-          )}
+      <div className="page-head">
+        <div>
+          <h1>Foresight</h1>
+          <p className="page-sub">Project how goals and life events shape your net worth.</p>
         </div>
-      </PageActions>
+        <div className="head-actions">
+          <div className="new-plan-dd">
+            <button className="btn primary sm" onClick={() => setMenuOpen((v) => !v)}>
+              <Icon name="plus" style={{ width: 15, height: 15 }} />New plan ▾
+            </button>
+            {menuOpen && (
+              <div className="new-plan-menu">
+                {KINDS.map((x) => (
+                  <button key={x.key} className="new-plan-menu-item" onClick={() => openCreate(x.key)}>
+                    <span className="legend-ico" aria-hidden="true">{planIcon(x.key)}</span>{x.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {newOpen && draft && (
         <div className="modal-overlay" onClick={() => { setNewOpen(false); setDraft(null); }}>
