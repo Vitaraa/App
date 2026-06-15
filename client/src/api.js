@@ -51,6 +51,8 @@ export const api = {
     request("/transactions/import", { method: "POST", body: { items, last4 } }),
   deleteTransaction: (id) => request(`/transactions/${id}`, { method: "DELETE" }),
   listAccountTransactions: (id) => request(`/accounts/${id}/transactions`),
+  accountBalanceHistory: (id, months) =>
+    request(`/accounts/${id}/balance-history${months ? `?months=${months}` : ""}`),
 
   // Accounts (net worth)
   listAccounts: () => request("/accounts"),

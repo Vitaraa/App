@@ -147,6 +147,23 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  -- Daily snapshots of each account's computed value, powering the balance
+  -- sparklines and the account-detail balance chart. One row per account per
+  -- day (upserted), so history accumulates as the user uses the app — and it
+  -- captures live investment values that transactions alone can't reconstruct.
+  CREATE TABLE IF NOT EXISTS balance_snapshots (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    date       TEXT NOT NULL,
+    balance    REAL NOT NULL DEFAULT 0,
+    UNIQUE(user_id, account_id, date),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_snap_acct ON balance_snapshots(user_id, account_id, date);
+
   -- Per-category monthly budget limits.
   CREATE TABLE IF NOT EXISTS budgets (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

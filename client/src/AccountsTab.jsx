@@ -7,7 +7,7 @@ import { shortenMerchant } from "./merchant.js";
 import { netWorthSeries, accountsNetWorth } from "./timeseries.js";
 import { fileToIcon } from "./imageIcon.js";
 import { Icon } from "./ds.jsx";
-import { NetWorthChart, fmt } from "./charts.jsx";
+import { NetWorthChart, Sparkline, fmt } from "./charts.jsx";
 
 // Net-worth value: server-computed `value` (investments price live) when
 // present, else the stored balance.
@@ -27,10 +27,17 @@ function AccountBadge({ type, icon }) {
 /* ============================================================
    ACCOUNT TRANSACTIONS MODAL
    ============================================================ */
+const monthShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const histLabel = (d) => {
+  const [y, m] = String(d).split("-");
+  return `${monthShort[Number(m) - 1]} ${String(y).slice(2)}`;
+};
+
 function AccountTxModal({ account, onClose, onChanged }) {
   const [txns, setTxns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [history, setHistory] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [aType, setAType] = useState("expense");
   const [aAmount, setAAmount] = useState("");
@@ -40,6 +47,7 @@ function AccountTxModal({ account, onClose, onChanged }) {
   async function reloadList() {
     try { setTxns(await api.listAccountTransactions(account.id)); }
     catch { setTxns([]); }
+    api.accountBalanceHistory(account.id, 24).then(setHistory).catch(() => {});
   }
   useEffect(() => {
     let live = true;
@@ -54,6 +62,11 @@ function AccountTxModal({ account, onClose, onChanged }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  useEffect(() => {
+    let live = true;
+    api.accountBalanceHistory(account.id, 24).then((r) => live && setHistory(r)).catch(() => {});
+    return () => { live = false; };
+  }, [account.id]);
 
   async function addTx(e) {
     e.preventDefault();
@@ -92,6 +105,16 @@ function AccountTxModal({ account, onClose, onChanged }) {
           </div>
           <button className="fs-modal-close" onClick={onClose} aria-label="Close">×</button>
         </div>
+
+        {history && history.series.length > 1 && (
+          <div style={{ padding: "12px 20px 0" }}>
+            <NetWorthChart
+              data={history.series.map((p) => p.value)}
+              labels={history.series.map((p) => histLabel(p.date))}
+              gradId="acctDetailFill" lineId="acctDetailLine"
+            />
+          </div>
+        )}
 
         <div style={{ padding: "14px 20px 4px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <span className="muted" style={{ fontSize: "var(--text-xs)" }}>
@@ -338,6 +361,7 @@ export default function AccountsTab({ txns = [], reload }) {
                 {a.holdingsCount || 0} holding{(a.holdingsCount || 0) === 1 ? "" : "s"} {open ? "▲" : "▼"}
               </button>
             </div>
+            {a.trend?.length > 1 && <Sparkline data={a.trend} />}
             <div className="acct-row-right">
               <span className="acct-row-bal">{fmt(acctValue(a), 2)}</span>
               <span className={"acct-row-chg " + (growth >= 0 ? "pos" : "neg")}>
@@ -362,6 +386,7 @@ export default function AccountsTab({ txns = [], reload }) {
           <span className="acct-row-name">{a.name}</span>
           <span className="acct-row-meta">{typeLabel(a.type)}{a.last4 ? ` ···· ${a.last4}` : ""}</span>
         </div>
+        {a.trend?.length > 1 && <Sparkline data={a.trend} />}
         <div className="acct-row-right">
           <span className={"acct-row-bal " + (acctValue(a) < 0 ? "neg" : "")}>{fmt(acctValue(a), 2)}</span>
         </div>

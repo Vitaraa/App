@@ -437,6 +437,60 @@ function valueHoldings(holdings, quotes) {
   return { value: round2(value), cost: round2(cost) };
 }
 
+// ---- Balance history (sparklines + account-detail chart) ----------------
+// Last `n` month keys ("YYYY-MM"), ascending and including the current month.
+function monthKeys(n) {
+  const out = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return out;
+}
+// First day of the month AFTER the given "YYYY-MM" key (an exclusive boundary).
+function firstOfNextMonth(mk) {
+  const [y, m] = mk.split("-").map(Number);
+  const d = new Date(y, m, 1); // m is 1-based, so this is the next month
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+// Build a monthly [{ date:"YYYY-MM-01", value }] series for one account.
+//   • Recorded daily snapshots win for any month they cover (real observed
+//     values, including live investment prices).
+//   • Months before snapshots exist are reconstructed from data: linked
+//     transactions for cash/credit/loan accounts (anchored to today's value),
+//     cumulative cost basis for investment accounts.
+//   • The final point is pinned to the account's current value.
+function accountBalanceSeries(account, { kind, currentValue, txns, holds, snaps, months }) {
+  const keys = monthKeys(months);
+  const snapByMonth = {};
+  for (const s of snaps) snapByMonth[String(s.date).slice(0, 7)] = s.balance; // snaps asc → last wins
+  const isInvest = account.type === "investment";
+
+  const series = keys.map((mk) => {
+    const boundary = firstOfNextMonth(mk);
+    let value;
+    if (snapByMonth[mk] != null) {
+      value = round2(snapByMonth[mk]);
+    } else if (isInvest) {
+      let cost = 0;
+      let any = false;
+      for (const h of holds) {
+        if (h.purchase_date && h.purchase_date < boundary) { cost += h.purchase_price * h.quantity; any = true; }
+      }
+      value = any ? round2(cost) : round2(currentValue);
+    } else {
+      let after = 0;
+      for (const t of txns) if (String(t.date) >= boundary) after += signedDelta(kind, t.type, t.amount);
+      value = round2(currentValue - after);
+    }
+    return { date: `${mk}-01`, value };
+  });
+  if (series.length) series[series.length - 1].value = round2(currentValue); // today = current
+  return series;
+}
+
 // Each account gets a `value` (what net worth uses): the balance for normal
 // accounts, or live market value for investment accounts.
 app.get("/api/accounts", auth, async (req, res) => {
@@ -467,31 +521,56 @@ app.get("/api/accounts", auth, async (req, res) => {
     kindByAccount[a.id] = GROUP_KIND[a.account_group || groupForType(a.type)] || a.kind;
   }
   const linked = db
-    .prepare("SELECT account_id, type, amount FROM transactions WHERE user_id = ? AND account_id IS NOT NULL")
+    .prepare("SELECT account_id, type, amount, date FROM transactions WHERE user_id = ? AND account_id IS NOT NULL")
     .all(req.user.id);
   const deltaByAccount = {};
+  const txnsByAccount = {};
   for (const t of linked) {
     const k = kindByAccount[t.account_id];
     if (!k) continue;
     deltaByAccount[t.account_id] = (deltaByAccount[t.account_id] || 0) + signedDelta(k, t.type, t.amount);
+    (txnsByAccount[t.account_id] ||= []).push(t);
   }
+
+  // Snapshots for the sparkline window (last 12 months), grouped per account.
+  const snapRows = db
+    .prepare("SELECT account_id, date, balance FROM balance_snapshots WHERE user_id = ? AND date >= date('now','-13 months') ORDER BY date")
+    .all(req.user.id);
+  const snapsByAccount = {};
+  for (const s of snapRows) (snapsByAccount[s.account_id] ||= []).push(s);
 
   const out = accts.map((a) => {
     const group = a.account_group || groupForType(a.type);
     const kind = GROUP_KIND[group] || a.kind;
+    let value;
+    let extra = {};
     if (a.type === "investment") {
-      const { value, cost } = valueHoldings(byAccount[a.id] || [], quotes);
-      return {
-        ...a, account_group: group, kind, value, cost,
-        growth: round2(value - cost), holdingsCount: (byAccount[a.id] || []).length,
-      };
+      const v = valueHoldings(byAccount[a.id] || [], quotes);
+      value = v.value;
+      extra = { cost: v.cost, growth: round2(v.value - v.cost), holdingsCount: (byAccount[a.id] || []).length };
+    } else {
+      value = round2(Number(a.balance) + (deltaByAccount[a.id] || 0));
     }
-    // value = starting balance + net of linked transactions
-    return {
-      ...a, account_group: group, kind,
-      value: round2(Number(a.balance) + (deltaByAccount[a.id] || 0)),
-    };
+    const series = accountBalanceSeries(a, {
+      kind, currentValue: value,
+      txns: txnsByAccount[a.id] || [], holds: byAccount[a.id] || [],
+      snaps: snapsByAccount[a.id] || [], months: 12,
+    });
+    return { ...a, account_group: group, kind, value, ...extra, trend: series.map((p) => p.value) };
   });
+
+  // Record today's value for each account (idempotent upsert) so real history
+  // accumulates day over day — including live investment prices.
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const upsert = db.prepare(
+      `INSERT INTO balance_snapshots (user_id, account_id, date, balance) VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id, account_id, date) DO UPDATE SET balance = excluded.balance`
+    );
+    const tx = db.transaction((rows) => { for (const r of rows) upsert.run(req.user.id, r.id, today, r.value); });
+    tx(out);
+  } catch { /* snapshots are best-effort */ }
+
   res.json(out);
 });
 
@@ -805,6 +884,38 @@ app.get("/api/accounts/:id/transactions", auth, (req, res) => {
       )
       .all(req.params.id, req.user.id)
   );
+});
+
+// Monthly balance history for one account (account-detail chart).
+app.get("/api/accounts/:id/balance-history", auth, async (req, res) => {
+  const a = db.prepare("SELECT * FROM accounts WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
+  if (!a) return res.status(404).json({ error: "Not found" });
+  const months = Math.min(60, Math.max(2, Number(req.query.months) || 24));
+
+  const group = a.account_group || groupForType(a.type);
+  const kind = GROUP_KIND[group] || a.kind;
+
+  let currentValue;
+  let holds = [];
+  let txns = [];
+  if (a.type === "investment") {
+    holds = db.prepare("SELECT * FROM holdings WHERE account_id = ? AND user_id = ?").all(a.id, req.user.id);
+    let quotes = {};
+    try { quotes = await getQuotes([...new Set(holds.map((h) => h.ticker))]); } catch { quotes = {}; }
+    currentValue = valueHoldings(holds, quotes).value;
+  } else {
+    txns = db
+      .prepare("SELECT type, amount, date FROM transactions WHERE user_id = ? AND account_id = ?")
+      .all(req.user.id, a.id);
+    const delta = txns.reduce((s, t) => s + signedDelta(kind, t.type, t.amount), 0);
+    currentValue = round2(Number(a.balance) + delta);
+  }
+  const snaps = db
+    .prepare("SELECT date, balance FROM balance_snapshots WHERE user_id = ? AND account_id = ? ORDER BY date")
+    .all(req.user.id, a.id);
+
+  const series = accountBalanceSeries(a, { kind, currentValue, txns, holds, snaps, months });
+  res.json({ accountId: a.id, name: a.name, currentValue, series });
 });
 
 app.delete("/api/accounts/:id", auth, (req, res) => {
